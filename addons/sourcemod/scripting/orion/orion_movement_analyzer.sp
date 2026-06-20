@@ -15,6 +15,7 @@ int g_OrionMoveAllowedPastTickDrift[MAXPLAYERS + 1];
 int g_OrionMoveAllowedFutureTickDrift[MAXPLAYERS + 1];
 int g_OrionMoveLastCommandGap[MAXPLAYERS + 1];
 int g_OrionMoveAllowedCommandGap[MAXPLAYERS + 1];
+int g_OrionMoveLastReportTick[MAXPLAYERS + 1];
 float g_OrionMoveScore[MAXPLAYERS + 1];
 float g_OrionMoveLastSpeed[MAXPLAYERS + 1];
 float g_OrionMoveSpeedhackTokens[MAXPLAYERS + 1];
@@ -26,6 +27,9 @@ float g_OrionMoveLossPercent[MAXPLAYERS + 1];
 #define ORION_MOVE_SPEEDHACK_BUCKET_BASE_TOKENS 8
 #define ORION_MOVE_SPEEDHACK_BUCKET_DECAY_PER_TICK 1.0
 #define ORION_MOVE_SPEEDHACK_BUCKET_SCORE 4.0
+#define ORION_MOVE_SPEEDHACK_BUCKET_MIN_SPEED 300.0
+#define ORION_MOVE_SCORE_MAX 150.0
+#define ORION_MOVE_REPORT_COOLDOWN_TICKS 66
 #define ORION_MOVE_COMMAND_GAP_BASE_TICKS 2
 #define ORION_MOVE_COMMAND_GAP_SCORE 5.0
 #define ORION_MOVE_FAKE_LAG_CHOKE_PERCENT 35.0
@@ -59,6 +63,7 @@ void Orion_Movement_ResetClient(int client)
     g_OrionMoveAllowedFutureTickDrift[client] = 0;
     g_OrionMoveLastCommandGap[client] = 0;
     g_OrionMoveAllowedCommandGap[client] = 0;
+    g_OrionMoveLastReportTick[client] = 0;
     g_OrionMoveScore[client] = 0.0;
     g_OrionMoveLastSpeed[client] = 0.0;
     g_OrionMoveSpeedhackTokens[client] = 0.0;
@@ -125,7 +130,7 @@ void Orion_Movement_ScoreCommandClock(int client, int buttons, int commandNumber
         g_OrionMoveCommandRepeatStreak[client]++;
         if (g_OrionMoveCommandRepeatStreak[client] > 8)
         {
-            g_OrionMoveScore[client] += 10.0;
+            Orion_Movement_AddScore(client, 10.0);
             if (Orion_Config_HardMitigationEnabled() && (buttons & IN_ATTACK) != 0)
             {
                 seed = GetRandomInt(1, 2147483647);
@@ -141,7 +146,7 @@ void Orion_Movement_ScoreCommandClock(int client, int buttons, int commandNumber
     if (g_OrionMoveLastCommandNumber[client] > 0 && commandNumber <= g_OrionMoveLastCommandNumber[client])
     {
         g_OrionMoveCommandRegressionStreak[client]++;
-        g_OrionMoveScore[client] += 6.0;
+        Orion_Movement_AddScore(client, 6.0);
     }
     else if (g_OrionMoveCommandRegressionStreak[client] > 0)
     {
@@ -187,7 +192,7 @@ void Orion_Movement_ScoreCommandGap(int client, int commandGap, int tickcount, f
         gapScore += 6.0;
     }
 
-    g_OrionMoveScore[client] += gapScore;
+    Orion_Movement_AddScore(client, gapScore);
     if (g_OrionMoveCommandGapStreak[client] >= 2 || commandGap >= allowedCommandGap + 6)
     {
         Orion_Movement_ReportIfNeeded(client, "command_gap_choke", tickcount, currentSpeed);
@@ -220,7 +225,7 @@ void Orion_Movement_ScoreTickDrift(int client, int buttons, int& tickcount, int&
     }
 
     int driftExcessTicks = tickDrift < 0 ? (-tickDrift - allowedPastDriftTicks) : (tickDrift - allowedFutureDriftTicks);
-    g_OrionMoveScore[client] += ORION_MOVE_TICK_DRIFT_SCORE + float(Orion_Movement_MinInt(driftExcessTicks, 12));
+    Orion_Movement_AddScore(client, ORION_MOVE_TICK_DRIFT_SCORE + float(Orion_Movement_MinInt(driftExcessTicks, 12)));
     if (Orion_Config_HardMitigationEnabled())
     {
         tickcount = tickDrift < 0 ? serverTick - allowedPastDriftTicks : serverTick + allowedFutureDriftTicks;
@@ -255,6 +260,13 @@ void Orion_Movement_ScoreSpeedhackBucket(int client, int tickcount, float curren
         remainingTokens = 0.0;
     }
 
+    if (currentSpeed < ORION_MOVE_SPEEDHACK_BUCKET_MIN_SPEED)
+    {
+        g_OrionMoveSpeedhackTokens[client] = remainingTokens;
+        g_OrionMoveLastServerTick[client] = serverTick;
+        return;
+    }
+
     remainingTokens += 1.0;
     g_OrionMoveSpeedhackTokens[client] = remainingTokens;
     g_OrionMoveLastServerTick[client] = serverTick;
@@ -270,7 +282,7 @@ void Orion_Movement_ScoreSpeedhackBucket(int client, int tickcount, float curren
         return;
     }
 
-    g_OrionMoveScore[client] += ORION_MOVE_SPEEDHACK_BUCKET_SCORE + (remainingTokens - g_OrionMoveAllowedSpeedhackTokens[client]);
+    Orion_Movement_AddScore(client, ORION_MOVE_SPEEDHACK_BUCKET_SCORE + (remainingTokens - g_OrionMoveAllowedSpeedhackTokens[client]));
     Orion_Movement_ReportIfNeeded(client, "speedhack_token_bucket", tickcount, currentSpeed);
 }
 
@@ -280,7 +292,7 @@ void Orion_Movement_ScoreJumpRelease(int client, int tickcount, float currentSpe
     if (g_OrionMoveLastJumpReleaseTick[client] > 0 && releaseIntervalTicks > 0 && releaseIntervalTicks <= ORION_MOVE_JUMP_RELEASE_CADENCE_TICKS)
     {
         g_OrionMoveJumpReleaseCadenceStreak[client]++;
-        g_OrionMoveScore[client] += 2.5;
+        Orion_Movement_AddScore(client, 2.5);
     }
     else if (releaseIntervalTicks > ORION_MOVE_JUMP_RELEASE_RESET_TICKS)
     {
@@ -289,7 +301,7 @@ void Orion_Movement_ScoreJumpRelease(int client, int tickcount, float currentSpe
 
     if (heldTicksBeforeRelease > 0 && heldTicksBeforeRelease <= ORION_MOVE_AUTOTRIGGER_RELEASE_TICKS && g_OrionMoveLastJumpTick[client] > 0)
     {
-        g_OrionMoveScore[client] += ORION_MOVE_AUTOTRIGGER_SCORE;
+        Orion_Movement_AddScore(client, ORION_MOVE_AUTOTRIGGER_SCORE);
     }
 
     g_OrionMoveLastJumpReleaseTick[client] = tickcount;
@@ -307,7 +319,7 @@ void Orion_Movement_ScoreJump(int client, int tickcount, bool onGround, float cu
     if (g_OrionMoveLastJumpTick[client] > 0 && tickDistance > 0 && tickDistance <= 3 && onGround)
     {
         g_OrionMovePerfectJumpStreak[client]++;
-        g_OrionMoveScore[client] += 7.5;
+        Orion_Movement_AddScore(client, 7.5);
     }
     else if (tickDistance > 12)
     {
@@ -316,21 +328,21 @@ void Orion_Movement_ScoreJump(int client, int tickcount, bool onGround, float cu
 
     if (g_OrionMovePerfectJumpStreak[client] >= 8)
     {
-        g_OrionMoveScore[client] += 15.0;
+        Orion_Movement_AddScore(client, 15.0);
     }
 
     if (onGround && g_OrionMoveLastJumpReleaseTick[client] > 0 && releaseToPressTicks > 0 && releaseToPressTicks <= ORION_MOVE_AUTOTRIGGER_RELEASE_TICKS)
     {
-        g_OrionMoveScore[client] += ORION_MOVE_AUTOTRIGGER_SCORE;
+        Orion_Movement_AddScore(client, ORION_MOVE_AUTOTRIGGER_SCORE);
         if (g_OrionMoveJumpReleaseCadenceStreak[client] >= 4)
         {
-            g_OrionMoveScore[client] += 7.0;
+            Orion_Movement_AddScore(client, 7.0);
         }
     }
 
     if (currentSpeed > 310.0 && currentSpeed >= g_OrionMoveLastSpeed[client])
     {
-        g_OrionMoveScore[client] += 5.0;
+        Orion_Movement_AddScore(client, 5.0);
     }
 
     g_OrionMoveLastJumpTick[client] = tickcount;
@@ -348,7 +360,7 @@ void Orion_Movement_ScoreSpeedWindow(int client, float currentSpeed, bool onGrou
         return;
     }
 
-    g_OrionMoveScore[client] += hasSuspiciousSpeed && hasAirControlBurst ? 16.0 : 8.0;
+    Orion_Movement_AddScore(client, hasSuspiciousSpeed && hasAirControlBurst ? 16.0 : 8.0);
     Orion_Movement_ReportIfNeeded(client, hasAirControlBurst ? "air_strafe_burst" : "speed_gain", tickcount, currentSpeed);
 }
 
@@ -415,6 +427,14 @@ void Orion_Movement_ReportIfNeeded(int client, const char[] reason, int tickcoun
         return;
     }
 
+    int serverTick = GetGameTickCount();
+    if (g_OrionMoveLastReportTick[client] > 0 && serverTick - g_OrionMoveLastReportTick[client] < ORION_MOVE_REPORT_COOLDOWN_TICKS)
+    {
+        return;
+    }
+
+    g_OrionMoveLastReportTick[client] = serverTick;
+
     char details[512];
     Format(
         details,
@@ -442,6 +462,15 @@ void Orion_Movement_ReportIfNeeded(int client, const char[] reason, int tickcoun
     char action[16];
     strcopy(action, sizeof(action), g_OrionMoveScore[client] >= Orion_Config_EnforceThreshold(alertThreshold) ? "ban" : "observe");
     Orion_Evidence_Submit(client, "movement", g_OrionMoveScore[client], action, details);
+}
+
+void Orion_Movement_AddScore(int client, float scoreDelta)
+{
+    g_OrionMoveScore[client] += scoreDelta;
+    if (g_OrionMoveScore[client] > ORION_MOVE_SCORE_MAX)
+    {
+        g_OrionMoveScore[client] = ORION_MOVE_SCORE_MAX;
+    }
 }
 
 void Orion_Movement_Decay(int client)

@@ -563,6 +563,9 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     args = parse_arguments()
     records = parse_orion_evidence_lines(
         args.log_path.read_text(encoding="utf-8", errors="replace").splitlines(),
