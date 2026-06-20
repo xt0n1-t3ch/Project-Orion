@@ -4,6 +4,9 @@
 #define ORION_AIM_REPEAT_EPSILON 0.025
 #define ORION_AIM_SNAP2_HIGH_DELTA 70.0
 #define ORION_AIM_WINDOW_HIGH_DELTA 155.0
+#define ORION_AIM_JOIN_GRACE_SECONDS 12.0
+#define ORION_AIM_RECENT_CONTEXT_TICKS 10
+#define ORION_AIM_MAX_SCORE 100.0
 
 float g_OrionAimLastAngles[MAXPLAYERS + 1][3];
 float g_OrionAimLastDelta[MAXPLAYERS + 1];
@@ -35,6 +38,7 @@ int g_OrionAimLastOutcomeTick[MAXPLAYERS + 1];
 int g_OrionAimLastOutcomeDamage[MAXPLAYERS + 1];
 int g_OrionAimLastOutcomeHitGroup[MAXPLAYERS + 1];
 float g_OrionAimScore[MAXPLAYERS + 1];
+float g_OrionAimReadyAt[MAXPLAYERS + 1];
 bool g_OrionAimHasAngles[MAXPLAYERS + 1];
 bool g_OrionAimLastOutcomeHeadshot[MAXPLAYERS + 1];
 bool g_OrionAimLastOutcomeNoSpreadSignal[MAXPLAYERS + 1];
@@ -69,6 +73,7 @@ void Orion_Aim_ResetClient(int client)
     g_OrionAimLastOutcomeHeadshot[client] = false;
     g_OrionAimLastOutcomeNoSpreadSignal[client] = false;
     g_OrionAimScore[client] = 0.0;
+    g_OrionAimReadyAt[client] = GetGameTime() + ORION_AIM_JOIN_GRACE_SECONDS;
     g_OrionAimLastDelta[client] = 0.0;
     g_OrionAimLastPitchDelta[client] = 0.0;
     g_OrionAimLastYawDelta[client] = 0.0;
@@ -130,6 +135,13 @@ void Orion_Aim_OnPlayerRunCmd(int client, int buttons, float angles[3], int tick
     bool attackStopped = !attackPressed && ((g_OrionAimLastButtons[client] & IN_ATTACK) != 0);
     int mouseMagnitude = Orion_AbsInt(mouse[0]) + Orion_AbsInt(mouse[1]);
 
+    if (Orion_Aim_IsInJoinGrace(client))
+    {
+        Orion_Aim_RecordHistory(client, angles, target, 0.0, mouseMagnitude, buttons, tickcount);
+        Orion_Aim_StoreCommandSnapshot(client, angles, target, 0.0, 0.0, 0.0, buttons, tickcount, mouseMagnitude);
+        return;
+    }
+
     Orion_Aim_ScoreAngleHistory(client, target, pitchDelta, yawDelta, totalDelta, mouseMagnitude, tickcount);
 
     if (attackStarted)
@@ -144,6 +156,13 @@ void Orion_Aim_OnPlayerRunCmd(int client, int buttons, float angles[3], int tick
 
     Orion_Aim_RecordHistory(client, angles, target, totalDelta, mouseMagnitude, buttons, tickcount);
 
+    Orion_Aim_StoreCommandSnapshot(client, angles, target, totalDelta, pitchDelta, yawDelta, buttons, tickcount, mouseMagnitude);
+
+    Orion_Aim_Decay(client);
+}
+
+void Orion_Aim_StoreCommandSnapshot(int client, float angles[3], int target, float totalDelta, float pitchDelta, float yawDelta, int buttons, int tickcount, int mouseMagnitude)
+{
     g_OrionAimLastAngles[client][0] = angles[0];
     g_OrionAimLastAngles[client][1] = angles[1];
     g_OrionAimLastAngles[client][2] = angles[2];
@@ -155,8 +174,6 @@ void Orion_Aim_OnPlayerRunCmd(int client, int buttons, float angles[3], int tick
     g_OrionAimLastTick[client] = tickcount;
     g_OrionAimLastMouseMagnitude[client] = mouseMagnitude;
     g_OrionAimHasAngles[client] = true;
-
-    Orion_Aim_Decay(client);
 }
 
 void Orion_Aim_RecordHistory(int client, float angles[3], int target, float totalDelta, int mouseMagnitude, int buttons, int tickcount)
@@ -193,7 +210,7 @@ void Orion_Aim_ScoreInvalidAngles(int client, float angles[3], int tickcount)
         return;
     }
 
-    g_OrionAimScore[client] += hasImpossiblePitch && hasImpossibleRoll ? 35.0 : 22.0;
+    Orion_Aim_AddScore(client, hasImpossiblePitch && hasImpossibleRoll ? 35.0 : 22.0);
 
     char details[256];
     Format(details, sizeof(details), "reason=invalid_angles pitch=%.2f yaw=%.2f roll=%.2f tick=%d patched=%d", angles[0], angles[1], angles[2], tickcount, Orion_Config_HardMitigationEnabled());
@@ -221,6 +238,18 @@ void Orion_Aim_ScoreAngleHistory(int client, int target, float pitchDelta, float
 {
     if (!g_OrionAimHasAngles[client])
     {
+        return;
+    }
+
+    bool hasValidTarget = Orion_Aim_IsValidTarget(target);
+    bool hasRecentOffensiveContext = Orion_Aim_HasRecentOffensiveContext(client, tickcount);
+    if (!hasValidTarget && !hasRecentOffensiveContext)
+    {
+        g_OrionAimAngleRepeatStreak[client] = 0;
+        if (g_OrionAimTriggerSupportSignal[client] > 0 && mouseMagnitude > 4)
+        {
+            g_OrionAimTriggerSupportSignal[client]--;
+        }
         return;
     }
 
@@ -261,7 +290,7 @@ void Orion_Aim_ScoreAngleHistory(int client, int target, float pitchDelta, float
         scoreDelta += 12.0;
     }
 
-    if (Orion_Aim_IsValidTarget(target) && g_OrionAimTargetTicks[client] <= 1 && totalDelta >= 18.0 && mouseMagnitude <= 1)
+    if (hasValidTarget && g_OrionAimTargetTicks[client] <= 1 && totalDelta >= 18.0 && mouseMagnitude <= 1)
     {
         g_OrionAimTriggerSupportSignal[client]++;
         scoreDelta += g_OrionAimTriggerSupportSignal[client] >= 2 ? 12.0 : 6.0;
@@ -273,7 +302,7 @@ void Orion_Aim_ScoreAngleHistory(int client, int target, float pitchDelta, float
 
     if (scoreDelta > 0.0)
     {
-        g_OrionAimScore[client] += scoreDelta;
+        Orion_Aim_AddScore(client, scoreDelta);
         Orion_Aim_ReportIfNeeded(client, "angle_history", target, totalDelta, mouseMagnitude, tickcount);
     }
 }
@@ -364,7 +393,7 @@ void Orion_Aim_ScoreAttackWindow(int client, int target, float angleDelta, int m
 
     if (scoreDelta > 0.0)
     {
-        g_OrionAimScore[client] += scoreDelta;
+        Orion_Aim_AddScore(client, scoreDelta);
         Orion_Aim_ReportIfNeeded(client, "attack_window", target, angleDelta, mouseMagnitude, tickcount);
     }
 }
@@ -382,7 +411,7 @@ void Orion_Aim_ScoreAttackRelease(int client, int tickcount)
         g_OrionAimOneTickShotStreak[client]++;
         if (g_OrionAimOneTickShotStreak[client] >= 3)
         {
-            g_OrionAimScore[client] += 15.0;
+            Orion_Aim_AddScore(client, 15.0);
             Orion_Aim_ReportIfNeeded(client, "one_tick_attack_streak", g_OrionAimLastTarget[client], g_OrionAimLastDelta[client], 0, tickcount);
         }
     }
@@ -413,13 +442,13 @@ public void Orion_Aim_OnWeaponFire(Event event, const char[] name, bool dontBroa
 
     if (g_OrionAimLastDelta[client] >= 30.0)
     {
-        g_OrionAimScore[client] += 8.0;
+        Orion_Aim_AddScore(client, 8.0);
         Orion_Aim_ReportIfNeeded(client, "weapon_fire_delta", g_OrionAimLastTarget[client], g_OrionAimLastDelta[client], 0, g_OrionAimLastTick[client]);
     }
 
     if (g_OrionAimTriggerSupportSignal[client] >= 3 && g_OrionAimLastMouseMagnitude[client] <= 1)
     {
-        g_OrionAimScore[client] += 10.0;
+        Orion_Aim_AddScore(client, 10.0);
         Orion_Aim_ReportIfNeeded(client, "trigger_autoshoot_fire", g_OrionAimLastTarget[client], g_OrionAimLastDelta[client], g_OrionAimLastMouseMagnitude[client], g_OrionAimLastTick[client]);
     }
 }
@@ -456,22 +485,22 @@ public void Orion_Aim_OnPlayerHurt(Event event, const char[] name, bool dontBroa
 
     if (g_OrionAimLastTarget[attacker] == victim && g_OrionAimTargetTicks[attacker] <= 2)
     {
-        g_OrionAimScore[attacker] += 15.0;
+        Orion_Aim_AddScore(attacker, 15.0);
     }
 
     if (g_OrionAimOneTickShotStreak[attacker] >= 2)
     {
-        g_OrionAimScore[attacker] += 12.0;
+        Orion_Aim_AddScore(attacker, 12.0);
     }
 
     if (g_OrionAimLastDelta[attacker] >= 25.0)
     {
-        g_OrionAimScore[attacker] += 10.0;
+        Orion_Aim_AddScore(attacker, 10.0);
     }
 
     if (Orion_Aim_PlayerIsAirborneOrFast(attacker))
     {
-        g_OrionAimScore[attacker] += 8.0;
+        Orion_Aim_AddScore(attacker, 8.0);
     }
 
     Orion_Aim_ScoreWeaponOutcome(attacker, hitGroup, false);
@@ -495,13 +524,13 @@ public void Orion_Aim_OnPlayerDeath(Event event, const char[] name, bool dontBro
 
     if (g_OrionAimLastTarget[attacker] == victim && g_OrionAimTargetTicks[attacker] <= 2)
     {
-        g_OrionAimScore[attacker] += 20.0;
+        Orion_Aim_AddScore(attacker, 20.0);
         Orion_Aim_ReportIfNeeded(attacker, "death_correlation", victim, g_OrionAimLastDelta[attacker], 0, g_OrionAimLastTick[attacker]);
     }
 
     if (g_OrionAimOneTickShotStreak[attacker] >= 2)
     {
-        g_OrionAimScore[attacker] += 15.0;
+        Orion_Aim_AddScore(attacker, 15.0);
         Orion_Aim_ReportIfNeeded(attacker, "autoshoot_death_correlation", victim, g_OrionAimLastDelta[attacker], 0, g_OrionAimLastTick[attacker]);
     }
 
@@ -548,7 +577,7 @@ void Orion_Aim_ScoreWeaponOutcome(int client, int hitGroup, bool isHeadshot)
 
     if (scoreDelta > 0.0)
     {
-        g_OrionAimScore[client] += scoreDelta;
+        Orion_Aim_AddScore(client, scoreDelta);
     }
 }
 
@@ -566,6 +595,71 @@ bool Orion_Aim_IsValidTarget(int target)
     return target > 0 && target <= MaxClients && IsClientInGame(target);
 }
 
+bool Orion_Aim_IsInJoinGrace(int client)
+{
+    return GetGameTime() < g_OrionAimReadyAt[client];
+}
+
+bool Orion_Aim_HasMatureTelemetry(int client)
+{
+    return !Orion_Aim_IsInJoinGrace(client) && g_OrionAimHistoryCount[client] >= ORION_AIM_HISTORY_SIZE;
+}
+
+bool Orion_Aim_HasRecentOffensiveContext(int client, int tickcount)
+{
+    int fireAge = g_OrionAimLastFireTick[client] > 0 ? tickcount - g_OrionAimLastFireTick[client] : -1;
+    int outcomeAge = g_OrionAimLastOutcomeTick[client] > 0 ? tickcount - g_OrionAimLastOutcomeTick[client] : -1;
+    return (fireAge >= 0 && fireAge <= ORION_AIM_RECENT_CONTEXT_TICKS)
+        || (outcomeAge >= 0 && outcomeAge <= ORION_AIM_RECENT_CONTEXT_TICKS);
+}
+
+bool Orion_Aim_IsBanEligible(int client, const char[] reason, int target, int tickcount)
+{
+    bool hasValidTarget = Orion_Aim_IsValidTarget(target);
+    bool hasRecentOffensiveContext = Orion_Aim_HasRecentOffensiveContext(client, tickcount);
+
+    if (!Orion_Aim_HasMatureTelemetry(client))
+    {
+        return false;
+    }
+
+    if (StrEqual(reason, "angle_history", false))
+    {
+        return hasValidTarget && hasRecentOffensiveContext;
+    }
+
+    if (StrEqual(reason, "attack_window", false)
+        || StrEqual(reason, "hurt_correlation", false)
+        || StrEqual(reason, "death_correlation", false)
+        || StrEqual(reason, "autoshoot_death_correlation", false))
+    {
+        return hasValidTarget;
+    }
+
+    if (StrEqual(reason, "weapon_fire_delta", false)
+        || StrEqual(reason, "trigger_autoshoot_fire", false)
+        || StrEqual(reason, "one_tick_attack_streak", false))
+    {
+        return hasValidTarget && hasRecentOffensiveContext;
+    }
+
+    return false;
+}
+
+void Orion_Aim_AddScore(int client, float scoreDelta)
+{
+    if (scoreDelta <= 0.0)
+    {
+        return;
+    }
+
+    g_OrionAimScore[client] += scoreDelta;
+    if (g_OrionAimScore[client] > ORION_AIM_MAX_SCORE)
+    {
+        g_OrionAimScore[client] = ORION_AIM_MAX_SCORE;
+    }
+}
+
 void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float angleDelta, int mouseMagnitude, int tickcount)
 {
     float alertThreshold = Orion_Config_AimThreshold();
@@ -578,10 +672,17 @@ void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float
     int outcomeAge = g_OrionAimLastOutcomeTick[client] > 0 ? tickcount - g_OrionAimLastOutcomeTick[client] : -1;
 
     char details[512];
+    bool isBanEligible = Orion_Aim_IsBanEligible(client, reason, target, tickcount);
+    float graceRemainingSeconds = g_OrionAimReadyAt[client] - GetGameTime();
+    if (graceRemainingSeconds < 0.0)
+    {
+        graceRemainingSeconds = 0.0;
+    }
+
     Format(
         details,
         sizeof(details),
-        "reason=%s target=%d angle_delta=%.1f snap2=%.1f total_delta=%.1f repeat=%d mouse=%d last_mouse=%d target_ticks=%d trigger=%d one_tick=%d hist=%d tick=%d weapon=%s weaponid=%d fire_age=%d burst=%d outcome_weapon=%s hitgroup=%d damage=%d headshot=%d nospread=%d outcome_age=%d",
+        "reason=%s target=%d angle_delta=%.1f snap2=%.1f total_delta=%.1f repeat=%d mouse=%d last_mouse=%d target_ticks=%d trigger=%d one_tick=%d hist=%d tick=%d weapon=%s weaponid=%d fire_age=%d burst=%d outcome_weapon=%s hitgroup=%d damage=%d headshot=%d nospread=%d outcome_age=%d ban_eligible=%d grace_left=%.1f",
         reason,
         target,
         angleDelta,
@@ -604,10 +705,12 @@ void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float
         g_OrionAimLastOutcomeDamage[client],
         g_OrionAimLastOutcomeHeadshot[client],
         g_OrionAimLastOutcomeNoSpreadSignal[client],
-        outcomeAge);
+        outcomeAge,
+        isBanEligible,
+        graceRemainingSeconds);
 
     char action[16];
-    strcopy(action, sizeof(action), g_OrionAimScore[client] >= Orion_Config_EnforceThreshold(alertThreshold) ? "ban" : "observe");
+    strcopy(action, sizeof(action), g_OrionAimScore[client] >= Orion_Config_EnforceThreshold(alertThreshold) && isBanEligible ? "ban" : "observe");
     Orion_Evidence_Submit(client, "aim", g_OrionAimScore[client], action, details);
 }
 
