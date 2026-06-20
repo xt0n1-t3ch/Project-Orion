@@ -28,9 +28,12 @@ Project Orion Phase 1 is a server-side SourceMod anti-cheat for competitive Left
 ## Controls
 
 - `orion_visibility_guard`: blocks ghost infected and inactive infected transmission to survivors when safe, exempts spectator/admin observation paths, and records reason-coded allowed/suppressed transmit counters for Phase 3 calibration.
-- `orion_aim_analyzer`: scores attack windows, target acquisition, one-tick autoshoot streaks, invalid angles, hit/death correlation, and mouse-command inconsistencies.
-- `orion_movement_analyzer`: scores perfect jump timing, velocity gain, command-number regressions, command tick drift, and tick anomalies.
-- `orion_integrity`: queries interpolation and visual/prediction cvars, tracks ping/loss limits, blocks chat-clear abuse, and scores invalid player names.
+- `orion_usercmd_guard`: scores SMAC-style usercmd reuse, command-number regression, tickcount mutation, button mutation, and impossible pitch/roll evidence with L4D2 view-state exceptions.
+- `orion_aim_analyzer`: scores attack windows, target acquisition, one-tick autoshoot streaks, invalid angles, hit/death correlation, mouse-command inconsistencies, angle-history snaps, repeated deltas, and starter weapon-outcome signals.
+- `orion_movement_analyzer`: scores perfect jump timing, jump-release/autotrigger cadence, velocity gain, speedhack token-bucket exhaustion, command gaps, fakelag/choke context, command-number regressions, and latency-aware tick drift.
+- `orion_cvar_policy`: owns the data-driven client-cvar policy registry for Orion/LILAC/SMAC/BLACKWATCH visual and prediction cvars.
+- `orion_integrity`: queries cvar policies, tracks ping/loss limits, blocks chat-clear abuse, and scores invalid player names.
+- `orion_abuse_guard`: scores command-rate abuse, dangerous client-command attempts, and name-change churn.
 - `orion_evidence`: logs structured evidence and gates alert/enforcement by mode.
 
 ## Phase 3 visibility/PVS guard
@@ -62,14 +65,15 @@ The remaining full PVS parity work needs these SourceMod/L4D2 pieces validated b
 
 Phase 1 covers Lilac's public feature classes: angle-cheat evidence, chat-clear patching, invalid cvar detection, bhop/macro evidence, aimbot/autoshoot/aimlock evidence, max interp evidence, max ping/loss evidence, backtrack/tick drift scoring, and invalid name detection. It also covers the SMAC classes relevant to L4D2 competitive servers: aimbot, wallhack/data minimization, cvars, speed/tick anomalies, spinhack-like invalid angles, and L4D2 ghost-state protection.
 
-## P0 hardening backlog
+## Remaining hardening backlog
 
-The replacement path is not complete until these P0 slices are implemented and proven against BLACKWATCH corpora:
+The replacement path is not complete until these slices are proven against BLACKWATCH corpora:
 
-- Full L4D2 wallhack/PVS transmit policy: line-of-sight/FOV trace cache, spectator/admin exceptions, weapon/entity transmit rules, and reason-coded allowed/suppressed counters.
-- Aim ring buffer parity: command-window history, shot tick lookup, hit/death correlation by exact tick window, and ping/loss weighting.
-- Nospread/norecoil probability model: weapon/range/movement buckets with rolling impossible-outcome scoring.
-- Infected movement baselines: hunter, jockey, charger, ladder, water, incap, pounce/charge/ride exceptions.
+- Full PVS block mode: enable spawned-enemy transmit blocking only after clean corpus validation.
+- Weapon/entity transmit parity: class allowlist for weapons, hittables, throwables, projectiles, and infected ability entities.
+- Nospread/norecoil probability model: weapon/range/movement buckets with rolling impossible-outcome scoring beyond starter event fields.
+- Infected movement baselines: hunter, jockey, charger, ladder, water, incap, pounce/charge/ride exception tuning.
+- RCON hardening: optional server-side RCON lock/allowlist if the hosting environment supports the required extension.
 
 ## False-positive stance
 

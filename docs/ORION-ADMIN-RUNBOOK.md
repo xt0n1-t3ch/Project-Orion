@@ -28,6 +28,7 @@ Run from RCON/server console:
 sm plugins list
 find orion_
 sm_orion_visibility_status
+sm_orion_status
 ```
 
 Expected:
@@ -87,8 +88,10 @@ Do not re-enable old SMAC modules during Phase 1. Orion is the replacement candi
 | invalid client convars | `orion_integrity` client cvar queries | score repeated bad values |
 | max lerp/interp abuse | `orion_integrity` interpolation bounds | score, then enforce after corpus |
 | max ping/loss abuse | `orion_integrity` network timer | disabled by default, configurable |
-| basic aimbot/autoshoot/aimlock | `orion_aim_analyzer` | rolling evidence score |
-| bhop/macro/strafe automation | `orion_movement_analyzer` | rolling evidence score |
+| usercmd/eye-test tamper | `orion_usercmd_guard` | shadow evidence for reuse, regression, tick/button mutation |
+| command/name/client abuse | `orion_abuse_guard` | block obvious control abuse; observe rate/noisy commands |
+| basic aimbot/autoshoot/aimlock | `orion_aim_analyzer` | rolling evidence score plus angle history |
+| bhop/macro/strafe automation | `orion_movement_analyzer` | rolling evidence score plus token bucket |
 | backtrack/fakelag tick abuse | `orion_movement_analyzer` + `orion_backtrack_patch_enable` | score suspicious drift |
 | wallhack/ESP mitigation | `orion_visibility_guard` | suppress ghost/inactive infected; log SMAC-style PVS-hidden enemy evidence |
 
@@ -112,3 +115,15 @@ sm_orion_visibility_status
 Review the counter mix before any broader transmit policy is enabled. `visibility_guard` evidence proves data minimization activity only; it is not ban proof by itself.
 
 Only enable `orion_visibility_pvs_block_enable "1"` on staging after a clean scrim corpus shows no false positives for normal holds, ghost spawns, spectators, and admin review.
+
+## Phase 4 parity staging
+
+Phase 4 adds the next LILAC/SMAC parity controls in shadow-first posture:
+
+- `usercmd_guard`: command-number reuse/regression, tickcount mutation, button mutation, and impossible pitch/roll evidence with L4D2 state exceptions.
+- `abuse_command` / `abuse_name`: command-rate, dangerous command, chat/name control abuse, and name-change spam evidence.
+- `integrity`: 38-entry cvar policy registry based on Orion, LILAC, SMAC, and BLACKWATCH client-cvar patterns.
+- `movement`: speedhack token bucket, command-gap/choke/fakelag, jump-release/autotrigger, and latency-aware backtrack windows.
+- `aim`: angle history ring, snap2/total-delta/repeated-angle patterns, autoshoot support, and starter weapon-outcome/nospread details.
+
+Treat these as corpus-building controls until clean and cheat-controlled sessions are both reviewed.

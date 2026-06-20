@@ -37,8 +37,11 @@ enum OrionMode
 #include "orion/orion_config.sp"
 #include "orion/orion_evidence.sp"
 #include "orion/orion_visibility_guard.sp"
+#include "orion/orion_usercmd_guard.sp"
 #include "orion/orion_aim_analyzer.sp"
 #include "orion/orion_movement_analyzer.sp"
+#include "orion/orion_abuse_guard.sp"
+#include "orion/orion_cvar_policy.sp"
 #include "orion/orion_integrity.sp"
 
 public Plugin myinfo =
@@ -55,8 +58,11 @@ public void OnPluginStart()
     Orion_Config_Init();
     Orion_Evidence_Init();
     Orion_Visibility_Init();
+    Orion_UserCmdGuard_Init();
     Orion_Aim_Init();
     Orion_Movement_Init();
+    Orion_AbuseGuard_Init();
+    Orion_CvarPolicy_Init();
     Orion_Integrity_Init();
 
     AutoExecConfig(true, "orion");
@@ -75,6 +81,9 @@ public void OnClientPutInServer(int client)
 {
     Orion_Aim_ResetClient(client);
     Orion_Movement_ResetClient(client);
+    Orion_UserCmdGuard_ResetClient(client);
+    Orion_AbuseGuard_ResetClient(client);
+    Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
     Orion_Visibility_HookClient(client);
 }
@@ -83,6 +92,9 @@ public void OnClientDisconnect(int client)
 {
     Orion_Aim_ResetClient(client);
     Orion_Movement_ResetClient(client);
+    Orion_UserCmdGuard_ResetClient(client);
+    Orion_AbuseGuard_ResetClient(client);
+    Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
     Orion_Visibility_ResetClient(client);
 }
@@ -105,8 +117,22 @@ public Action OnPlayerRunCmd(
         return Plugin_Continue;
     }
 
+    float originalAngles[3];
+    originalAngles[0] = angles[0];
+    originalAngles[1] = angles[1];
+    originalAngles[2] = angles[2];
+    int originalTickcount = tickcount;
+    int originalSeed = seed;
+
+    Orion_UserCmdGuard_OnPlayerRunCmd(client, buttons, angles, cmdnum, tickcount, mouse);
     Orion_Aim_OnPlayerRunCmd(client, buttons, angles, tickcount, mouse);
     Orion_Movement_OnPlayerRunCmd(client, buttons, angles, cmdnum, tickcount, seed);
+
+    if (angles[0] != originalAngles[0] || angles[1] != originalAngles[1] || angles[2] != originalAngles[2] || tickcount != originalTickcount || seed != originalSeed)
+    {
+        return Plugin_Changed;
+    }
+
     return Plugin_Continue;
 }
 
@@ -128,6 +154,7 @@ public void OnClientSettingsChanged(int client)
     }
 
     Orion_Integrity_OnClientSettingsChanged(client);
+    Orion_AbuseGuard_OnClientSettingsChanged(client);
 }
 
 bool Orion_IsHumanPlayer(int client)

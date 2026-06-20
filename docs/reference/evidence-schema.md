@@ -10,7 +10,7 @@ Each Orion line is a space-delimited `key=value` record. Quoted values are allow
 |---|---:|---|
 | `seq` | yes | Map-local evidence sequence. It is useful for ordering, not global identity. |
 | `session` | yes | Runtime calibration session label from `orion_session_label` / `sm_orion_session`. |
-| `type` | yes | Evidence family: `aim`, `angle_guard`, `movement`, `integrity`, `network`, `chat_guard`, `name_guard`, or `visibility_guard`. |
+| `type` | yes | Evidence family: `aim`, `angle_guard`, `movement`, `integrity`, `network`, `chat_guard`, `name_guard`, `visibility_guard`, `usercmd_guard`, `abuse_command`, or `abuse_name`. |
 | `score` | yes | Rolling confidence score from `0.0` to `100.0+`. A single high score is review material, not ban proof by itself. |
 | `action` | yes | Requested action at event time: `observe`, `alert`, or `ban`. In `shadow`, the effective action remains evidence-only. |
 | `client` | yes | SourceMod client index at event time. Never use it as durable player identity. |
@@ -34,14 +34,17 @@ Use these keys when adding new SourcePawn evidence. The parser accepts unknown k
 
 | Evidence family | Required details | Optional details |
 |---|---|---|
-| `aim` | `reason`, `target`, `tick` | `angle_delta`, `mouse`, `target_ticks`, `weapon`, `range`, `visible`, `shot_button`, `hitgroup` |
+| `aim` | `reason`, `target`, `tick` | `angle_delta`, `mouse`, `target_ticks`, `weapon`, `range`, `visible`, `shot_button`, `hitgroup`, `snap2_delta`, `total_delta`, `repeat_delta_streak`, `weapon_outcome` |
 | `angle_guard` | `reason`, `tick` | `pitch`, `yaw`, `roll`, `delta`, `buttons` |
-| `movement` | `reason`, `tick` | `jumps`, `ground_ticks`, `velocity`, `entropy`, `tick_drift`, `buttons` |
-| `integrity` | `reason` | `cvar`, `value`, `expected`, `ping_ms`, `loss_percent`, `lerp_ms` |
+| `movement` | `reason`, `tick` | `jumps`, `ground_ticks`, `velocity`, `entropy`, `tick_drift`, `buttons`, `command_gap`, `allowed_gap`, `latency_ms`, `choke_percent`, `token_bucket` |
+| `integrity` | `reason` | `cvar`, `value`, `expected`, `ping_ms`, `loss_percent`, `lerp_ms`, `action_label` |
 | `network` | `reason` | `ping_ms`, `loss_percent`, `choke_percent`, `tick_drift` |
 | `chat_guard` | `reason` | `message_length`, `control_chars`, `blocked` |
 | `name_guard` | `reason` | `name_length`, `control_chars`, `blocked` |
 | `visibility_guard` | `reason`, `entity` | `class`, `team`, `spawn_state`, `blocked`, `suppressed`, `observer_blocks`, `hidden_ticks` |
+| `usercmd_guard` | `reason`, `cmdnum`, `tick` | `buttons`, `reuse_tamper_streak`, `regression_streak`, `tick_reuse_streak`, `button_mutation_streak`, `pitch`, `yaw`, `roll`, `mouse_x`, `mouse_y` |
+| `abuse_command` | `reason`, `command` | `argc`, `count`, `window_seconds`, `blocked` |
+| `abuse_name` | `reason` | `name_length`, `control_chars`, `changes`, `window_seconds`, `blocked` |
 
 ## Calibration session labels
 
