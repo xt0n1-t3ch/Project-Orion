@@ -28,10 +28,14 @@ Project Orion Phase 1 is a server-side SourceMod anti-cheat for competitive Left
 ## Controls
 
 - `orion_visibility_guard`: blocks ghost infected and inactive infected transmission to survivors when safe.
-- `orion_aim_analyzer`: scores attack windows, target acquisition, angle deltas, hit/death correlation, and mouse-command inconsistencies.
-- `orion_movement_analyzer`: scores perfect jump timing, velocity gain, and tick anomalies.
-- `orion_integrity`: queries interpolation settings and scores unsafe values or failures.
+- `orion_aim_analyzer`: scores attack windows, target acquisition, one-tick autoshoot streaks, invalid angles, hit/death correlation, and mouse-command inconsistencies.
+- `orion_movement_analyzer`: scores perfect jump timing, velocity gain, command-number regressions, command tick drift, and tick anomalies.
+- `orion_integrity`: queries interpolation and visual/prediction cvars, tracks ping/loss limits, blocks chat-clear abuse, and scores invalid player names.
 - `orion_evidence`: logs structured evidence and gates alert/enforcement by mode.
+
+## Lilac/SMAC replacement bar
+
+Phase 1 covers Lilac's public feature classes: angle-cheat evidence, chat-clear patching, invalid cvar detection, bhop/macro evidence, aimbot/autoshoot/aimlock evidence, max interp evidence, max ping/loss evidence, backtrack/tick drift scoring, and invalid name detection. It also covers the SMAC classes relevant to L4D2 competitive servers: aimbot, wallhack/data minimization, cvars, speed/tick anomalies, spinhack-like invalid angles, and L4D2 ghost-state protection.
 
 ## False-positive stance
 

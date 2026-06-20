@@ -8,6 +8,13 @@ ConVar g_OrionAdminAlerts = null;
 ConVar g_OrionMaxLerpMs = null;
 ConVar g_OrionMaxInterpRatio = null;
 ConVar g_OrionMinInterpRatio = null;
+ConVar g_OrionAngleGuardEnable = null;
+ConVar g_OrionChatGuardEnable = null;
+ConVar g_OrionNameGuardEnable = null;
+ConVar g_OrionBacktrackPatchEnable = null;
+ConVar g_OrionBacktrackToleranceTicks = null;
+ConVar g_OrionMaxPingMs = null;
+ConVar g_OrionMaxLossPercent = null;
 ConVar g_OrionBanMinutes = null;
 ConVar g_OrionBanProvider = null;
 ConVar g_OrionEvidenceLogLevel = null;
@@ -24,6 +31,13 @@ void Orion_Config_Init()
     g_OrionMaxLerpMs = CreateConVar("orion_max_lerp_ms", "150.0", "Maximum allowed client interpolation in milliseconds.", _, true, 0.0, true, 500.0);
     g_OrionMaxInterpRatio = CreateConVar("orion_max_interp_ratio", "2.0", "Maximum allowed cl_interp_ratio.", _, true, 0.0, true, 10.0);
     g_OrionMinInterpRatio = CreateConVar("orion_min_interp_ratio", "0.0", "Minimum allowed cl_interp_ratio.", _, true, 0.0, true, 10.0);
+    g_OrionAngleGuardEnable = CreateConVar("orion_angle_guard_enable", "1", "Score and patch impossible client view angles.", _, true, 0.0, true, 1.0);
+    g_OrionChatGuardEnable = CreateConVar("orion_chat_guard_enable", "1", "Block chat-clear/control-character abuse.", _, true, 0.0, true, 1.0);
+    g_OrionNameGuardEnable = CreateConVar("orion_name_guard_enable", "1", "Score newline/control-character names.", _, true, 0.0, true, 1.0);
+    g_OrionBacktrackPatchEnable = CreateConVar("orion_backtrack_patch_enable", "1", "Score suspicious command tick drift/backtrack windows.", _, true, 0.0, true, 1.0);
+    g_OrionBacktrackToleranceTicks = CreateConVar("orion_backtrack_tolerance_ticks", "2", "Allowed command tick drift before backtrack evidence is scored.", _, true, 0.0, true, 16.0);
+    g_OrionMaxPingMs = CreateConVar("orion_max_ping_ms", "0", "Maximum allowed ping in milliseconds; 0 disables ping enforcement evidence.", _, true, 0.0, true, 1000.0);
+    g_OrionMaxLossPercent = CreateConVar("orion_max_loss_percent", "0.0", "Maximum allowed packet loss percent; 0 disables packet-loss evidence.", _, true, 0.0, true, 100.0);
     g_OrionBanMinutes = CreateConVar("orion_ban_minutes", "0", "Ban length in minutes for enforce mode; 0 is permanent.", _, true, 0.0);
     g_OrionBanProvider = CreateConVar("orion_ban_provider", "basebans", "Ban provider label: none, basebans, or sourcebans.");
     g_OrionEvidenceLogLevel = CreateConVar("orion_evidence_log_level", "2", "Evidence verbosity: 0 off, 1 high-confidence, 2 suspicious.", _, true, 0.0, true, 2.0);
@@ -106,4 +120,39 @@ float Orion_Config_MaxInterpRatio()
 float Orion_Config_MinInterpRatio()
 {
     return g_OrionMinInterpRatio.FloatValue;
+}
+
+bool Orion_Config_AngleGuardEnabled()
+{
+    return g_OrionAngleGuardEnable != null && g_OrionAngleGuardEnable.BoolValue;
+}
+
+bool Orion_Config_ChatGuardEnabled()
+{
+    return g_OrionChatGuardEnable != null && g_OrionChatGuardEnable.BoolValue;
+}
+
+bool Orion_Config_NameGuardEnabled()
+{
+    return g_OrionNameGuardEnable != null && g_OrionNameGuardEnable.BoolValue;
+}
+
+bool Orion_Config_BacktrackPatchEnabled()
+{
+    return g_OrionBacktrackPatchEnable != null && g_OrionBacktrackPatchEnable.BoolValue;
+}
+
+int Orion_Config_BacktrackToleranceTicks()
+{
+    return g_OrionBacktrackToleranceTicks.IntValue;
+}
+
+float Orion_Config_MaxPingMs()
+{
+    return g_OrionMaxPingMs.FloatValue;
+}
+
+float Orion_Config_MaxLossPercent()
+{
+    return g_OrionMaxLossPercent.FloatValue;
 }

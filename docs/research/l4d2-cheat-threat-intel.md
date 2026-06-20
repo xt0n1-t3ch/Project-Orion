@@ -13,8 +13,8 @@ This report summarizes public threat intelligence used to design Project Orion P
 | UnknownCheats L4D2 tutorial post | Single-post reader identifies a 2024 tutorial titled `AIMBOT / ESP / SILENTAIM / BHOP / SPEEDHACK`. | Cheat bundles commonly combine aim, visuals, movement, and speed; Orion modules must be independent and composable. |
 | YouGame RU search results | Results include L4D2 `ESP, Wallhack, Aimbot`, private `Predator` style WH/AIM listings, and separate bhop threads. | RU marketplace vocabulary matches Reborn feature classes; Orion should support WH/AIM/BHOP controls. |
 | Chinese search results | Results include 求生之路2 透视/自瞄 menu posts, Dunt0 listings with wallhack/ESP/aimbot/triggerbot/bhop/spinbot, and L4D2 autobhop tooling. | CN ecosystem confirms the same feature clusters and injection/menu workflow. |
-| LILAC README | LILAC lists angle cheats, invalid convars, bhop, basic projectile/hitscan aimbot, aimlock, max interp, backtrack patch, macro detection, and says it is bypassable to an extent. | Orion should complement Lilac with L4D2-specific telemetry and evidence, not replace every check blindly. |
-| SMAC README/source | SMAC has modules for aimbot, wallhack, cvars, speedhack, spinhack, and L4D2 fixes; SMAC wallhack uses visibility/PVS-style transmission controls. | Data minimization is the right server-side strategy for ESP classes, but must be narrowed for L4D2. |
+| LILAC README | LILAC lists angle cheats, invalid convars, bhop, basic projectile/hitscan aimbot, aimlock, max interp, backtrack patch, macro detection, max ping, invalid names, and chat-clear fixes; it also says it is bypassable to an extent. | Orion must replace the useful public Lilac coverage with L4D2-specific evidence, data minimization, safer defaults, and shadow-mode proof before enforcement. |
+| SMAC README/source | SMAC has modules for aimbot, wallhack, cvars, speedhack, spinhack, command/RCON monitoring, and L4D2 fixes; SMAC wallhack uses visibility/PVS-style transmission controls. | Orion should absorb the L4D2-relevant SMAC classes while avoiding broad legacy modules that produce noise or are not useful for this server. |
 | SourceMod `OnPlayerRunCmd` API | Exposes buttons, angles, weapon, tickcount, seed, and mouse deltas. | Core telemetry surface for aim/movement/tick anomaly scoring. |
 
 ## Feature taxonomy
@@ -68,6 +68,19 @@ Server-side control:
 3. **Multi-signal scoring.** Aim, movement, integrity, and visibility evidence are independent. One module can flag without forcing a ban.
 4. **Data minimization beats ESP.** If the server does not transmit ghost infected state, local glow/chams cannot render that hidden state.
 5. **Statistical controls for humanized cheats.** Humanized aim and no recoil need long-window scoring, not single-snap checks.
+
+## Replacement parity matrix
+
+| Legacy check | Orion replacement |
+|---|---|
+| Lilac angle-cheats / SMAC spinhack | invalid pitch/roll scoring in `orion_aim_analyzer`; command-angle evidence logged before enforcement |
+| Lilac chat-clear and invalid chat characters | `orion_integrity` blocks control-character or excessive chat payloads |
+| Lilac invalid convar detector / SMAC cvars | `orion_integrity` queries interpolation, prediction, lag compensation, `sv_cheats`, `mat_wireframe`, and `r_drawothermodels` |
+| Lilac max interp and backtrack patch | interpolation cvar scoring plus command tick drift scoring |
+| Lilac max ping | configurable ping/loss scoring, disabled by default until BLACKWATCH decides the competitive threshold |
+| Lilac bhop/macro | jump-window streaks, speed gain, air-strafe burst, and command timing evidence |
+| Lilac aimbot/autoshoot/aimlock / SMAC aimbot | attack-window, one-tick autoshoot, target acquisition, mouse/angle mismatch, hurt/death correlation |
+| SMAC wallhack / L4D2 no-ghost classes | survivor-side suppression of ghost or dead infected transmit where safe |
 
 ## Open research lanes
 

@@ -7,7 +7,7 @@ Orion emits line-oriented evidence records to `addons/sourcemod/logs/orion.log`.
 | Field | Meaning |
 |---|---|
 | `seq` | map-local evidence sequence |
-| `type` | `aim`, `movement`, `integrity`, or `visibility_guard` |
+| `type` | evidence family such as `aim`, `angle_guard`, `movement`, `integrity`, `network`, `chat_guard`, `name_guard`, or `visibility_guard` |
 | `score` | rolling confidence score from `0.0` to `100.0+` |
 | `action` | `observe` or `ban` |
 | `client` | SourceMod client index at event time |

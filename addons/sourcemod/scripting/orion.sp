@@ -10,7 +10,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define ORION_PLUGIN_VERSION "0.1.0"
+#define ORION_PLUGIN_VERSION "0.2.0"
 #define ORION_TEAM_SPECTATOR 1
 #define ORION_TEAM_SURVIVOR 2
 #define ORION_TEAM_INFECTED 3
@@ -104,8 +104,28 @@ public Action OnPlayerRunCmd(
     }
 
     Orion_Aim_OnPlayerRunCmd(client, buttons, angles, tickcount, mouse);
-    Orion_Movement_OnPlayerRunCmd(client, buttons, tickcount);
+    Orion_Movement_OnPlayerRunCmd(client, buttons, angles, cmdnum, tickcount, seed);
     return Plugin_Continue;
+}
+
+public Action OnClientSayCommand(int client, const char[] command, const char[] message)
+{
+    if (!Orion_Config_IsEnabled() || !Orion_IsHumanPlayer(client))
+    {
+        return Plugin_Continue;
+    }
+
+    return Orion_Integrity_OnClientSayCommand(client, command, message);
+}
+
+public void OnClientSettingsChanged(int client)
+{
+    if (!Orion_Config_IsEnabled() || !Orion_IsHumanPlayer(client))
+    {
+        return;
+    }
+
+    Orion_Integrity_OnClientSettingsChanged(client);
 }
 
 bool Orion_IsHumanPlayer(int client)
