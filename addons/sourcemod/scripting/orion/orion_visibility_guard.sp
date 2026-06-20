@@ -10,6 +10,7 @@ enum
     OrionVisibilityReason_InactiveInfected,
     OrionVisibilityReason_SpawnedInfected,
     OrionVisibilityReason_PvsHiddenEnemy,
+    OrionVisibilityReason_InfectedSpawnNearSurvivor,
     OrionVisibilityReason_Count
 };
 
@@ -21,12 +22,14 @@ int g_OrionVisibilityPvsHiddenTicks[MAXPLAYERS + 1][MAXPLAYERS + 1];
 int g_OrionVisibilityLastCheckedTick[MAXPLAYERS + 1][MAXPLAYERS + 1];
 bool g_OrionVisibilityIsVisible[MAXPLAYERS + 1][MAXPLAYERS + 1];
 float g_OrionVisibilityLastVisibleAt[MAXPLAYERS + 1][MAXPLAYERS + 1];
+int g_OrionVisibilityLastSpawnReportTick[MAXPLAYERS + 1];
 int g_OrionVisibilityTraceTick = -1;
 int g_OrionVisibilityTraceCount = 0;
 
 void Orion_Visibility_Init()
 {
     RegAdminCmd("sm_orion_visibility_status", Orion_Visibility_CommandStatus, ADMFLAG_GENERIC, "Show Project Orion visibility guard transmit counters.");
+    HookEvent("player_spawn", Orion_Visibility_OnPlayerSpawn, EventHookMode_Post);
     Orion_Visibility_ResetMapCounters();
 
     for (int client = 1; client <= MaxClients; client++)
@@ -74,6 +77,7 @@ void Orion_Visibility_ResetClient(int client)
     }
 
     g_OrionVisibilityBlocked[client] = 0;
+    g_OrionVisibilityLastSpawnReportTick[client] = 0;
     Orion_Visibility_ResetPairCache(client);
 }
 
@@ -227,6 +231,88 @@ bool Orion_ShouldEvaluatePvsTransmit(int entity, int observer)
     }
 
     return true;
+}
+
+public void Orion_Visibility_OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+    if (!Orion_Config_IsEnabled() || !Orion_Config_SpawnAbuseGuardEnabled())
+    {
+        return;
+    }
+
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (!Orion_IsHumanPlayer(client) || GetClientTeam(client) != ORION_TEAM_INFECTED)
+    {
+        return;
+    }
+
+    CreateTimer(0.15, Orion_Visibility_CheckInfectedSpawn, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Orion_Visibility_CheckInfectedSpawn(Handle timer, any userId)
+{
+    int infected = GetClientOfUserId(userId);
+    if (!Orion_Config_IsEnabled() || !Orion_Config_SpawnAbuseGuardEnabled() || !Orion_IsAliveHumanPlayer(infected))
+    {
+        return Plugin_Stop;
+    }
+
+    if (GetClientTeam(infected) != ORION_TEAM_INFECTED || GetEntProp(infected, Prop_Send, "m_isGhost") == 1)
+    {
+        return Plugin_Stop;
+    }
+
+    int nearestSurvivor = 0;
+    float nearestDistance = 0.0;
+    if (!Orion_Visibility_FindNearestAliveSurvivor(infected, nearestSurvivor, nearestDistance))
+    {
+        return Plugin_Stop;
+    }
+
+    bool hasLineOfSight = Orion_Visibility_IsObserverAbleToSeeTarget(nearestSurvivor, infected);
+    bool isNearSpawn = nearestDistance <= Orion_Config_SpawnAbuseNearDistance();
+    bool isVisibleSpawn = hasLineOfSight && nearestDistance <= Orion_Config_SpawnAbuseVisibleDistance();
+    if (!isNearSpawn && !isVisibleSpawn)
+    {
+        return Plugin_Stop;
+    }
+
+    int currentTick = Orion_Visibility_CurrentTick();
+    if (g_OrionVisibilityLastSpawnReportTick[infected] > 0 && currentTick - g_OrionVisibilityLastSpawnReportTick[infected] < 66)
+    {
+        return Plugin_Stop;
+    }
+
+    g_OrionVisibilityLastSpawnReportTick[infected] = currentTick;
+    Orion_Visibility_RecordSpawnEvidence(infected, nearestSurvivor, nearestDistance, hasLineOfSight, isNearSpawn, isVisibleSpawn);
+    return Plugin_Stop;
+}
+
+bool Orion_Visibility_FindNearestAliveSurvivor(int infected, int& nearestSurvivor, float& nearestDistance)
+{
+    float infectedCenter[3];
+    Orion_Visibility_GetClientCenter(infected, infectedCenter);
+
+    nearestSurvivor = 0;
+    nearestDistance = 0.0;
+    for (int survivor = 1; survivor <= MaxClients; survivor++)
+    {
+        if (!Orion_IsAliveHumanPlayer(survivor) || GetClientTeam(survivor) != ORION_TEAM_SURVIVOR)
+        {
+            continue;
+        }
+
+        float survivorEyePosition[3];
+        GetClientEyePosition(survivor, survivorEyePosition);
+        float distance = GetVectorDistance(survivorEyePosition, infectedCenter);
+        if (nearestSurvivor == 0 || distance < nearestDistance)
+        {
+            nearestSurvivor = survivor;
+            nearestDistance = distance;
+        }
+    }
+
+    return nearestSurvivor != 0;
 }
 
 bool Orion_ShouldBlockPvsTransmit(int entity, int observer)
@@ -537,6 +623,31 @@ void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int rea
     Orion_Evidence_Submit(observer, "visibility_guard", score, "observe", details);
 }
 
+void Orion_Visibility_RecordSpawnEvidence(int infected, int survivor, float distance, bool hasLineOfSight, bool isNearSpawn, bool isVisibleSpawn)
+{
+    Orion_Visibility_RecordSuppressed(OrionVisibilityReason_InfectedSpawnNearSurvivor);
+
+    char spawnState[32];
+    Orion_Visibility_GetSpawnState(infected, spawnState, sizeof(spawnState));
+    int zombieClass = HasEntProp(infected, Prop_Send, "m_zombieClass") ? GetEntProp(infected, Prop_Send, "m_zombieClass") : 0;
+    float score = isNearSpawn && isVisibleSpawn ? 85.0 : 72.0;
+
+    char details[256];
+    Format(
+        details,
+        sizeof(details),
+        "reason=infected_spawn_near_survivor entity=%d nearest_survivor=%d distance=%.1f visible=%d near=%d visible_spawn=%d zombie_class=%d spawn_state=%s",
+        infected,
+        survivor,
+        distance,
+        hasLineOfSight,
+        isNearSpawn,
+        isVisibleSpawn,
+        zombieClass,
+        spawnState);
+    Orion_Evidence_Submit(infected, "spawn_guard", score, "observe", details);
+}
+
 void Orion_Visibility_GetReasonName(int reason, char[] reasonName, int reasonNameLength)
 {
     switch (reason)
@@ -576,6 +687,10 @@ void Orion_Visibility_GetReasonName(int reason, char[] reasonName, int reasonNam
         case OrionVisibilityReason_PvsHiddenEnemy:
         {
             strcopy(reasonName, reasonNameLength, "pvs_hidden_enemy");
+        }
+        case OrionVisibilityReason_InfectedSpawnNearSurvivor:
+        {
+            strcopy(reasonName, reasonNameLength, "infected_spawn_near_survivor");
         }
         default:
         {

@@ -57,10 +57,11 @@ public Action Orion_Readiness_Command(int client, int args)
         Orion_Config_EnforceThreshold(integrityAlertThreshold));
     ReplyToCommand(
         client,
-        "[Orion] guards visibility=%d pvs=%d pvs_block=%d angle=%d chat=%d name=%d backtrack=%d hard_mitigation=%d",
+        "[Orion] guards visibility=%d pvs=%d pvs_block=%d spawn_guard=%d angle=%d chat=%d name=%d backtrack=%d hard_mitigation=%d",
         Orion_Config_VisibilityGuardEnabled(),
         Orion_Config_VisibilityPvsEnabled(),
         Orion_Config_VisibilityPvsBlockEnabled(),
+        Orion_Config_SpawnAbuseGuardEnabled(),
         Orion_Config_AngleGuardEnabled(),
         Orion_Config_ChatGuardEnabled(),
         Orion_Config_NameGuardEnabled(),

@@ -6,6 +6,7 @@ static const float ORION_USERCMD_SCORE_TICK_REUSE = 12.0;
 static const float ORION_USERCMD_SCORE_TICK_MUTATION = 22.0;
 static const float ORION_USERCMD_SCORE_BUTTON_MUTATION = 20.0;
 static const float ORION_USERCMD_SCORE_IMPOSSIBLE_ANGLE = 28.0;
+static const float ORION_USERCMD_SCORE_MAX = 150.0;
 static const int ORION_USERCMD_REUSE_STREAK_REPORT_MIN = 3;
 static const int ORION_USERCMD_REPORT_COOLDOWN_TICKS = 32;
 
@@ -84,7 +85,7 @@ bool Orion_UserCmdGuard_CheckCommandNumber(int client, int commandNumber, int ti
     if (commandNumber < g_OrionUserCmdLastCommandNumber[client])
     {
         g_OrionUserCmdCommandRegressionStreak[client]++;
-        g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_COMMAND_REGRESSION;
+        Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_COMMAND_REGRESSION);
         Orion_UserCmdGuard_ReportEvidence(client, "cmdnum_regression", commandNumber, tickcount, buttons, angles, mouse);
         return true;
     }
@@ -92,7 +93,7 @@ bool Orion_UserCmdGuard_CheckCommandNumber(int client, int commandNumber, int ti
     if (commandNumber == g_OrionUserCmdLastCommandNumber[client])
     {
         g_OrionUserCmdCommandReuseStreak[client]++;
-        g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_COMMAND_REUSE;
+        Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_COMMAND_REUSE);
 
         if (g_OrionUserCmdCommandReuseStreak[client] >= ORION_USERCMD_REUSE_STREAK_REPORT_MIN)
         {
@@ -115,7 +116,7 @@ bool Orion_UserCmdGuard_CheckTickCount(int client, int commandNumber, int tickco
 {
     if (commandNumber == g_OrionUserCmdLastCommandNumber[client] && tickcount != g_OrionUserCmdLastTickCount[client])
     {
-        g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_TICK_MUTATION;
+        Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_TICK_MUTATION);
         Orion_UserCmdGuard_ReportEvidence(client, "tickcount_mutated_reused_cmd", commandNumber, tickcount, buttons, angles, mouse);
         return true;
     }
@@ -123,7 +124,7 @@ bool Orion_UserCmdGuard_CheckTickCount(int client, int commandNumber, int tickco
     if (tickcount < g_OrionUserCmdLastTickCount[client])
     {
         g_OrionUserCmdTickRegressionStreak[client]++;
-        g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_TICK_MUTATION;
+        Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_TICK_MUTATION);
         Orion_UserCmdGuard_ReportEvidence(client, "tickcount_regression", commandNumber, tickcount, buttons, angles, mouse);
         return true;
     }
@@ -131,7 +132,7 @@ bool Orion_UserCmdGuard_CheckTickCount(int client, int commandNumber, int tickco
     if (tickcount == g_OrionUserCmdLastTickCount[client])
     {
         g_OrionUserCmdTickReuseStreak[client]++;
-        g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_TICK_REUSE;
+        Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_TICK_REUSE);
 
         if (g_OrionUserCmdTickReuseStreak[client] >= ORION_USERCMD_REUSE_STREAK_REPORT_MIN)
         {
@@ -164,7 +165,7 @@ bool Orion_UserCmdGuard_CheckButtons(int client, int commandNumber, int tickcoun
     }
 
     g_OrionUserCmdButtonMutationStreak[client]++;
-    g_OrionUserCmdScore[client] += ORION_USERCMD_SCORE_BUTTON_MUTATION;
+    Orion_UserCmdGuard_AddScore(client, ORION_USERCMD_SCORE_BUTTON_MUTATION);
     Orion_UserCmdGuard_ReportEvidence(client, "buttons_mutated_reused_cmd", commandNumber, tickcount, buttons, angles, mouse);
     return true;
 }
@@ -186,9 +187,9 @@ bool Orion_UserCmdGuard_CheckImpossibleAngles(int client, int commandNumber, int
     }
 
     g_OrionUserCmdImpossibleAngleStreak[client]++;
-    g_OrionUserCmdScore[client] += hasImpossiblePitch && hasImpossibleRoll
+    Orion_UserCmdGuard_AddScore(client, hasImpossiblePitch && hasImpossibleRoll
         ? ORION_USERCMD_SCORE_IMPOSSIBLE_ANGLE * 1.5
-        : ORION_USERCMD_SCORE_IMPOSSIBLE_ANGLE;
+        : ORION_USERCMD_SCORE_IMPOSSIBLE_ANGLE);
     Orion_UserCmdGuard_ReportEvidence(client, "impossible_angles", commandNumber, tickcount, buttons, angles, mouse);
     return true;
 }
@@ -293,7 +294,66 @@ void Orion_UserCmdGuard_ReportEvidence(int client, const char[] reason, int comm
         g_OrionUserCmdButtonMutationStreak[client],
         g_OrionUserCmdImpossibleAngleStreak[client]);
 
-    Orion_Evidence_Submit(client, "usercmd_guard", g_OrionUserCmdScore[client], "observe", details);
+    char action[16];
+    strcopy(action, sizeof(action), Orion_UserCmdGuard_IsBanEligible(client, commandNumber, tickcount) ? "ban" : "observe");
+    Orion_Evidence_Submit(client, "usercmd_guard", g_OrionUserCmdScore[client], action, details);
+
+    if (Orion_UserCmdGuard_IsLagExploitReason(reason) && g_OrionUserCmdScore[client] >= Orion_Config_IntegrityThreshold())
+    {
+        char lagDetails[320];
+        Format(
+            lagDetails,
+            sizeof(lagDetails),
+            "source=usercmd_guard reason=%s cmd=%d/%d tick=%d/%d btn=%d/%d streaks=%d,%d,%d,%d,%d score=%.1f",
+            reason,
+            commandNumber,
+            g_OrionUserCmdLastCommandNumber[client],
+            tickcount,
+            g_OrionUserCmdLastTickCount[client],
+            buttons,
+            g_OrionUserCmdLastButtons[client],
+            g_OrionUserCmdCommandReuseStreak[client],
+            g_OrionUserCmdCommandRegressionStreak[client],
+            g_OrionUserCmdTickReuseStreak[client],
+            g_OrionUserCmdTickRegressionStreak[client],
+            g_OrionUserCmdButtonMutationStreak[client],
+            g_OrionUserCmdScore[client]);
+        Orion_Evidence_Submit(client, "lag_exploit", g_OrionUserCmdScore[client], action, lagDetails);
+    }
+}
+
+bool Orion_UserCmdGuard_IsLagExploitReason(const char[] reason)
+{
+    return StrEqual(reason, "cmdnum_reuse", false)
+        || StrEqual(reason, "cmdnum_regression", false)
+        || StrEqual(reason, "tickcount_reuse", false)
+        || StrEqual(reason, "tickcount_regression", false)
+        || StrEqual(reason, "tickcount_mutated_reused_cmd", false)
+        || StrEqual(reason, "buttons_mutated_reused_cmd", false);
+}
+
+bool Orion_UserCmdGuard_IsBanEligible(int client, int commandNumber, int tickcount)
+{
+    if (commandNumber <= 0 || tickcount <= 0 || g_OrionUserCmdScore[client] < Orion_Config_EnforceThreshold(Orion_Config_IntegrityThreshold()))
+    {
+        return false;
+    }
+
+    return g_OrionUserCmdCommandReuseStreak[client] >= 6
+        || g_OrionUserCmdCommandRegressionStreak[client] >= 4
+        || g_OrionUserCmdTickReuseStreak[client] >= 8
+        || g_OrionUserCmdTickRegressionStreak[client] >= 4
+        || g_OrionUserCmdButtonMutationStreak[client] >= 4
+        || g_OrionUserCmdImpossibleAngleStreak[client] >= 4;
+}
+
+void Orion_UserCmdGuard_AddScore(int client, float scoreDelta)
+{
+    g_OrionUserCmdScore[client] += scoreDelta;
+    if (g_OrionUserCmdScore[client] > ORION_USERCMD_SCORE_MAX)
+    {
+        g_OrionUserCmdScore[client] = ORION_USERCMD_SCORE_MAX;
+    }
 }
 
 void Orion_UserCmdGuard_Decay(int client)

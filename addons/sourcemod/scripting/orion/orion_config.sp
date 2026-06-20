@@ -9,6 +9,9 @@ ConVar g_OrionVisibilityPvsBlockEnable = null;
 ConVar g_OrionVisibilityPvsGraceSeconds = null;
 ConVar g_OrionVisibilityPvsMinBlockDistance = null;
 ConVar g_OrionVisibilityTraceBudgetPerTick = null;
+ConVar g_OrionSpawnAbuseGuardEnable = null;
+ConVar g_OrionSpawnAbuseVisibleDistance = null;
+ConVar g_OrionSpawnAbuseNearDistance = null;
 ConVar g_OrionAdminAlerts = null;
 ConVar g_OrionMaxLerpMs = null;
 ConVar g_OrionMaxInterpRatio = null;
@@ -39,6 +42,9 @@ void Orion_Config_Init()
     g_OrionVisibilityPvsGraceSeconds = CreateConVar("orion_visibility_pvs_grace_seconds", "3.0", "Seconds to keep enemy transmit after last proven visibility.", _, true, 0.0, true, 10.0);
     g_OrionVisibilityPvsMinBlockDistance = CreateConVar("orion_visibility_pvs_min_block_distance", "900.0", "Minimum enemy distance before PVS block mode may suppress transmit.", _, true, 0.0, true, 5000.0);
     g_OrionVisibilityTraceBudgetPerTick = CreateConVar("orion_visibility_trace_budget_per_tick", "512", "Maximum Orion visibility traces per server tick before fail-open.", _, true, 1.0, true, 4096.0);
+    g_OrionSpawnAbuseGuardEnable = CreateConVar("orion_spawn_abuse_guard_enable", "1", "Log infected spawn materialization near or visible to survivors.", _, true, 0.0, true, 1.0);
+    g_OrionSpawnAbuseVisibleDistance = CreateConVar("orion_spawn_abuse_visible_distance", "650.0", "Maximum visible survivor distance for infected spawn-abuse evidence.", _, true, 0.0, true, 3000.0);
+    g_OrionSpawnAbuseNearDistance = CreateConVar("orion_spawn_abuse_near_distance", "250.0", "Maximum proximity distance for infected spawn-abuse evidence even without LOS.", _, true, 0.0, true, 1500.0);
     g_OrionAdminAlerts = CreateConVar("orion_admin_alerts", "1", "Alert admins for high-confidence Orion evidence.", _, true, 0.0, true, 1.0);
     g_OrionMaxLerpMs = CreateConVar("orion_max_lerp_ms", "150.0", "Maximum allowed client interpolation in milliseconds.", _, true, 0.0, true, 500.0);
     g_OrionMaxInterpRatio = CreateConVar("orion_max_interp_ratio", "2.0", "Maximum allowed cl_interp_ratio.", _, true, 0.0, true, 10.0);
@@ -90,6 +96,21 @@ float Orion_Config_VisibilityPvsMinBlockDistance()
 int Orion_Config_VisibilityTraceBudgetPerTick()
 {
     return g_OrionVisibilityTraceBudgetPerTick.IntValue;
+}
+
+bool Orion_Config_SpawnAbuseGuardEnabled()
+{
+    return g_OrionSpawnAbuseGuardEnable != null && g_OrionSpawnAbuseGuardEnable.BoolValue;
+}
+
+float Orion_Config_SpawnAbuseVisibleDistance()
+{
+    return g_OrionSpawnAbuseVisibleDistance.FloatValue;
+}
+
+float Orion_Config_SpawnAbuseNearDistance()
+{
+    return g_OrionSpawnAbuseNearDistance.FloatValue;
 }
 
 bool Orion_Config_AdminAlertsEnabled()
