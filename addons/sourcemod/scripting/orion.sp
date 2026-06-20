@@ -10,7 +10,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define ORION_PLUGIN_VERSION "0.2.0"
+#define ORION_PLUGIN_VERSION "0.5.0"
 #define ORION_TEAM_SPECTATOR 1
 #define ORION_TEAM_SURVIVOR 2
 #define ORION_TEAM_INFECTED 3
@@ -43,6 +43,7 @@ enum OrionMode
 #include "orion/orion_abuse_guard.sp"
 #include "orion/orion_cvar_policy.sp"
 #include "orion/orion_integrity.sp"
+#include "orion/orion_readiness.sp"
 
 public Plugin myinfo =
 {
@@ -56,6 +57,7 @@ public Plugin myinfo =
 public void OnPluginStart()
 {
     Orion_Config_Init();
+    Orion_Readiness_Init();
     Orion_Evidence_Init();
     Orion_Visibility_Init();
     Orion_UserCmdGuard_Init();

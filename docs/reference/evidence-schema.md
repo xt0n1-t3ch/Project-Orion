@@ -12,7 +12,7 @@ Each Orion line is a space-delimited `key=value` record. Quoted values are allow
 | `session` | yes | Runtime calibration session label from `orion_session_label` / `sm_orion_session`. |
 | `type` | yes | Evidence family: `aim`, `angle_guard`, `movement`, `integrity`, `network`, `chat_guard`, `name_guard`, `visibility_guard`, `usercmd_guard`, `abuse_command`, or `abuse_name`. |
 | `score` | yes | Rolling confidence score from `0.0` to `100.0+`. A single high score is review material, not ban proof by itself. |
-| `action` | yes | Requested action at event time: `observe`, `alert`, or `ban`. In `shadow`, the effective action remains evidence-only. |
+| `action` | yes | Requested action at event time: `observe`, `alert`, `block`, or `ban`. In `shadow`, `ban` remains evidence-only; `block` is reserved for narrow defensive command/message blocks that are applied immediately. |
 | `client` | yes | SourceMod client index at event time. Never use it as durable player identity. |
 | `steamid` | yes | Steam2 auth ID when available. Redact it in shared corpus exports. |
 | `name` | yes | Player name at event time. This is mutable and can contain hostile formatting. |
@@ -89,10 +89,12 @@ JSON root:
 |---|---|
 | `schema_version` | Always `orion-corpus-v1` for this parser version. |
 | `session` | Session label, server label, record count, score filter, and redaction flag. |
-| `counts` | Counts by evidence type, requested action, mode, and map. |
+| `counts` | Counts by evidence family, evidence type, requested action, family/action pair, severity, mode, and map. |
+| `session_summaries` | Per-session counts by family, type, action, severity, and map. |
+| `false_positive_gate` | Clean/control-session review gate with candidate events at or above the review score floor. |
 | `score_summary_by_type` | Count, max score, and average score by evidence type. |
 | `players` | Per-player event count and max score. SteamIDs are pseudonymized when `--redact-steamids` is used. |
-| `events` | Flat action ledger. Each item preserves the raw evidence fields plus parsed `details`. |
+| `events` | Flat action ledger. Each item preserves the raw evidence fields plus parsed `details`, normalized `family`, severity bucket, and false-positive candidate flag. |
 
 CSV output is intentionally flat for quick review in spreadsheets. The `details` column is JSON text.
 

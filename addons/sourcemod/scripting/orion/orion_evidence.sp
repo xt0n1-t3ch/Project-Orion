@@ -31,6 +31,12 @@ void Orion_Evidence_Submit(int client, const char[] evidenceType, float score, c
     char modeName[32];
     char sessionLabel[64];
     Orion_Evidence_GetClientIdentity(client, authId, sizeof(authId), playerName, sizeof(playerName));
+    Orion_Evidence_NormalizeQuotedValue(playerName, sizeof(playerName));
+
+    char safeDetails[256];
+    strcopy(safeDetails, sizeof(safeDetails), details);
+    Orion_Evidence_NormalizeQuotedValue(safeDetails, sizeof(safeDetails));
+
     GetCurrentMap(mapName, sizeof(mapName));
     Orion_Config_GetModeName(modeName, sizeof(modeName));
     Orion_Config_GetSessionLabel(sessionLabel, sizeof(sessionLabel));
@@ -38,7 +44,7 @@ void Orion_Evidence_Submit(int client, const char[] evidenceType, float score, c
     g_OrionEvidenceSequence++;
     LogToFileEx(
         g_OrionEvidenceLogPath,
-        "seq=%d session=%s type=%s score=%.1f action=%s client=%N steamid=%s name=\"%s\" map=%s mode=%s details=\"%s\"",
+        "seq=%d session=%s type=%s score=%.1f action=%s client=%d steamid=%s name=\"%s\" map=%s mode=%s details=\"%s\"",
         g_OrionEvidenceSequence,
         sessionLabel,
         evidenceType,
@@ -49,9 +55,9 @@ void Orion_Evidence_Submit(int client, const char[] evidenceType, float score, c
         playerName,
         mapName,
         modeName,
-        details);
+        safeDetails);
 
-    Orion_Evidence_AlertOrEnforce(client, evidenceType, score, action, details);
+    Orion_Evidence_AlertOrEnforce(client, evidenceType, score, action, safeDetails);
 }
 
 public Action Orion_Evidence_CommandSession(int client, int args)
@@ -130,6 +136,17 @@ void Orion_Evidence_GetClientIdentity(int client, char[] authId, int authIdLengt
 
     GetClientName(client, playerName, playerNameLength);
     GetClientAuthId(client, AuthId_Steam2, authId, authIdLength, true);
+}
+
+void Orion_Evidence_NormalizeQuotedValue(char[] value, int valueLength)
+{
+    for (int index = 0; index < valueLength && value[index] != '\0'; index++)
+    {
+        if (value[index] == '"' || value[index] < 32 || value[index] == 127)
+        {
+            value[index] = '_';
+        }
+    }
 }
 
 void PrintToAdmins(const char[] format, any ...)
