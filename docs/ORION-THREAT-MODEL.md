@@ -27,11 +27,36 @@ Project Orion Phase 1 is a server-side SourceMod anti-cheat for competitive Left
 
 ## Controls
 
-- `orion_visibility_guard`: blocks ghost infected and inactive infected transmission to survivors when safe.
+- `orion_visibility_guard`: blocks ghost infected and inactive infected transmission to survivors when safe, exempts spectator/admin observation paths, and records reason-coded allowed/suppressed transmit counters for Phase 3 calibration.
 - `orion_aim_analyzer`: scores attack windows, target acquisition, one-tick autoshoot streaks, invalid angles, hit/death correlation, and mouse-command inconsistencies.
 - `orion_movement_analyzer`: scores perfect jump timing, velocity gain, command-number regressions, command tick drift, and tick anomalies.
 - `orion_integrity`: queries interpolation and visual/prediction cvars, tracks ping/loss limits, blocks chat-clear abuse, and scores invalid player names.
 - `orion_evidence`: logs structured evidence and gates alert/enforcement by mode.
+
+## Phase 3 visibility/PVS guard
+
+The Phase 3 guard keeps runtime enforcement conservative while adding SMAC-style PVS evidence:
+
+- `SDKHook_SetTransmit` remains the player-transmit interception point.
+- `sm_orion_visibility_status` reports reason-coded allowed and suppressed counters after a staging run.
+- Spectators are allowed through so casters/admin observers do not lose legitimate observer data.
+- Dead admin observers with `orion_visibility_bypass` are allowed through for review workflows.
+- Alive survivors are not granted an admin bypass, so a playing admin does not receive hidden infected data.
+- Ghost/inactive infected transmission remains blocked immediately.
+- Spawned enemy players are checked with FOV plus center/weapon-tip/hull-corner LOS traces and emit `reason=pvs_hidden_enemy` evidence after the configured grace window.
+- Spawned-enemy PVS blocking is disabled by default with `orion_visibility_pvs_block_enable "0"` until the clean corpus proves it safe.
+
+The remaining full PVS parity work needs these SourceMod/L4D2 pieces validated before enabling broader blocking:
+
+| Need | SourceMod hook/forward | Compile/runtime blocker |
+|---|---|---|
+| Player transmit policy | `SDKHook_SetTransmit` on each client | already wired; duplicate hooks are guarded by `g_OrionVisibilityHooked` |
+| Map reset | `OnMapStart` | wired to reset counters |
+| Observer/admin exceptions | `GetClientTeam`, `IsPlayerAlive`, `CheckCommandAccess` | policy is conservative; admin bypass is dead-observer only |
+| LOS/FOV cache | `GetClientEyePosition`, `GetClientEyeAngles`, `TR_TraceRayFilter` | compiled; still needs live L4D2 collision validation before block mode |
+| Entity transmit rules | `OnEntityCreated`, `SDKHook_Spawn`, `SDKHook_SetTransmit` for projectiles/weapons | needs class allowlist for L4D2 weapons, hittables, throwables, and infected abilities |
+| Per-target PVS cache | short timer or tick-window cache keyed by observer/entity | needs CPU budget proof under full 8v8/spectator load |
+| Evidence export | `Orion_Evidence_Submit` with `visibility_guard` details | reason-coded suppression is wired; allowed counters stay status-only to avoid log spam |
 
 ## Lilac/SMAC replacement bar
 

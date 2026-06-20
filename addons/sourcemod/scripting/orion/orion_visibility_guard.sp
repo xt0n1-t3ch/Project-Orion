@@ -1,10 +1,37 @@
+enum
+{
+    OrionVisibilityReason_InvalidEntity = 0,
+    OrionVisibilityReason_Self,
+    OrionVisibilityReason_NonHumanObserver,
+    OrionVisibilityReason_SpectatorObserver,
+    OrionVisibilityReason_AdminObserver,
+    OrionVisibilityReason_TeamPolicy,
+    OrionVisibilityReason_GhostInfected,
+    OrionVisibilityReason_InactiveInfected,
+    OrionVisibilityReason_SpawnedInfected,
+    OrionVisibilityReason_PvsHiddenEnemy,
+    OrionVisibilityReason_Count
+};
+
 int g_OrionVisibilityBlocked[MAXPLAYERS + 1];
+bool g_OrionVisibilityHooked[MAXPLAYERS + 1];
+int g_OrionVisibilityAllowedByReason[OrionVisibilityReason_Count];
+int g_OrionVisibilitySuppressedByReason[OrionVisibilityReason_Count];
+int g_OrionVisibilityPvsHiddenTicks[MAXPLAYERS + 1][MAXPLAYERS + 1];
+int g_OrionVisibilityLastCheckedTick[MAXPLAYERS + 1][MAXPLAYERS + 1];
+bool g_OrionVisibilityIsVisible[MAXPLAYERS + 1][MAXPLAYERS + 1];
+float g_OrionVisibilityLastVisibleAt[MAXPLAYERS + 1][MAXPLAYERS + 1];
+int g_OrionVisibilityTraceTick = -1;
+int g_OrionVisibilityTraceCount = 0;
 
 void Orion_Visibility_Init()
 {
+    RegAdminCmd("sm_orion_visibility_status", Orion_Visibility_CommandStatus, ADMFLAG_GENERIC, "Show Project Orion visibility guard transmit counters.");
+    Orion_Visibility_ResetMapCounters();
+
     for (int client = 1; client <= MaxClients; client++)
     {
-        g_OrionVisibilityBlocked[client] = 0;
+        Orion_Visibility_ResetClient(client);
         if (IsClientInGame(client))
         {
             Orion_Visibility_HookClient(client);
@@ -12,11 +39,70 @@ void Orion_Visibility_Init()
     }
 }
 
+void Orion_Visibility_OnMapStart()
+{
+    Orion_Visibility_ResetMapCounters();
+    g_OrionVisibilityTraceTick = -1;
+    g_OrionVisibilityTraceCount = 0;
+
+    for (int client = 1; client <= MaxClients; client++)
+    {
+        Orion_Visibility_ResetPairCache(client);
+    }
+}
+
 void Orion_Visibility_HookClient(int client)
 {
-    if (client > 0 && client <= MaxClients)
+    if (client > 0 && client <= MaxClients && !g_OrionVisibilityHooked[client])
     {
         SDKHook(client, SDKHook_SetTransmit, Orion_Visibility_OnSetTransmit);
+        g_OrionVisibilityHooked[client] = true;
+    }
+}
+
+void Orion_Visibility_ResetClient(int client)
+{
+    if (client <= 0 || client > MaxClients)
+    {
+        return;
+    }
+
+    if (g_OrionVisibilityHooked[client])
+    {
+        SDKUnhook(client, SDKHook_SetTransmit, Orion_Visibility_OnSetTransmit);
+        g_OrionVisibilityHooked[client] = false;
+    }
+
+    g_OrionVisibilityBlocked[client] = 0;
+    Orion_Visibility_ResetPairCache(client);
+}
+
+void Orion_Visibility_ResetPairCache(int client)
+{
+    if (client <= 0 || client > MaxClients)
+    {
+        return;
+    }
+
+    for (int otherClient = 1; otherClient <= MaxClients; otherClient++)
+    {
+        g_OrionVisibilityPvsHiddenTicks[client][otherClient] = 0;
+        g_OrionVisibilityPvsHiddenTicks[otherClient][client] = 0;
+        g_OrionVisibilityLastCheckedTick[client][otherClient] = 0;
+        g_OrionVisibilityLastCheckedTick[otherClient][client] = 0;
+        g_OrionVisibilityIsVisible[client][otherClient] = true;
+        g_OrionVisibilityIsVisible[otherClient][client] = true;
+        g_OrionVisibilityLastVisibleAt[client][otherClient] = 0.0;
+        g_OrionVisibilityLastVisibleAt[otherClient][client] = 0.0;
+    }
+}
+
+void Orion_Visibility_ResetMapCounters()
+{
+    for (int reason = 0; reason < view_as<int>(OrionVisibilityReason_Count); reason++)
+    {
+        g_OrionVisibilityAllowedByReason[reason] = 0;
+        g_OrionVisibilitySuppressedByReason[reason] = 0;
     }
 }
 
@@ -27,21 +113,86 @@ public Action Orion_Visibility_OnSetTransmit(int entity, int observer)
         return Plugin_Continue;
     }
 
-    if (!Orion_ShouldBlockPlayerTransmit(entity, observer))
+    int reason = OrionVisibilityReason_InvalidEntity;
+    if (Orion_ShouldBlockPlayerTransmit(entity, observer, reason))
+    {
+        Orion_Visibility_RecordSuppressedEvidence(entity, observer, reason, 55.0, true);
+        return Plugin_Handled;
+    }
+
+    Orion_Visibility_RecordAllowed(reason);
+    if (!Orion_Config_VisibilityPvsEnabled() || !Orion_ShouldEvaluatePvsTransmit(entity, observer))
     {
         return Plugin_Continue;
     }
 
-    g_OrionVisibilityBlocked[observer]++;
-    if (g_OrionVisibilityBlocked[observer] == 1 || (g_OrionVisibilityBlocked[observer] % 250) == 0)
+    if (!Orion_ShouldBlockPvsTransmit(entity, observer))
     {
-        Orion_Evidence_Submit(observer, "visibility_guard", 55.0, "observe", "blocked ghost infected transmit to survivor");
+        return Plugin_Continue;
     }
 
-    return Plugin_Handled;
+    Orion_Visibility_RecordSuppressedEvidence(entity, observer, OrionVisibilityReason_PvsHiddenEnemy, 65.0, Orion_Config_VisibilityPvsBlockEnabled());
+    return Orion_Config_VisibilityPvsBlockEnabled() ? Plugin_Handled : Plugin_Continue;
 }
 
-bool Orion_ShouldBlockPlayerTransmit(int entity, int observer)
+bool Orion_ShouldBlockPlayerTransmit(int entity, int observer, int& reason)
+{
+    if (entity <= 0 || entity > MaxClients || observer <= 0 || observer > MaxClients)
+    {
+        reason = OrionVisibilityReason_InvalidEntity;
+        return false;
+    }
+
+    if (entity == observer || !IsClientInGame(entity) || !IsClientInGame(observer))
+    {
+        reason = entity == observer ? OrionVisibilityReason_Self : OrionVisibilityReason_InvalidEntity;
+        return false;
+    }
+
+    if (IsFakeClient(observer))
+    {
+        reason = OrionVisibilityReason_NonHumanObserver;
+        return false;
+    }
+
+    int entityTeam = GetClientTeam(entity);
+    int observerTeam = GetClientTeam(observer);
+
+    if (observerTeam == ORION_TEAM_SPECTATOR)
+    {
+        reason = OrionVisibilityReason_SpectatorObserver;
+        return false;
+    }
+
+    if (!IsPlayerAlive(observer) && CheckCommandAccess(observer, "orion_visibility_bypass", ADMFLAG_GENERIC, true))
+    {
+        reason = OrionVisibilityReason_AdminObserver;
+        return false;
+    }
+
+    if (entityTeam != ORION_TEAM_INFECTED || observerTeam != ORION_TEAM_SURVIVOR)
+    {
+        reason = OrionVisibilityReason_TeamPolicy;
+        return false;
+    }
+
+    if (!IsPlayerAlive(entity))
+    {
+        reason = OrionVisibilityReason_InactiveInfected;
+        return true;
+    }
+
+    if (GetEntProp(entity, Prop_Send, "m_isGhost") == 1)
+    {
+        reason = OrionVisibilityReason_GhostInfected;
+        return true;
+    }
+
+    reason = OrionVisibilityReason_SpawnedInfected;
+    return false;
+}
+
+bool Orion_ShouldEvaluatePvsTransmit(int entity, int observer)
 {
     if (entity <= 0 || entity > MaxClients || observer <= 0 || observer > MaxClients)
     {
@@ -53,28 +204,424 @@ bool Orion_ShouldBlockPlayerTransmit(int entity, int observer)
         return false;
     }
 
-    if (IsFakeClient(observer))
+    if (IsFakeClient(entity) || IsFakeClient(observer))
     {
         return false;
     }
 
     int entityTeam = GetClientTeam(entity);
     int observerTeam = GetClientTeam(observer);
-
-    if (entityTeam != ORION_TEAM_INFECTED || observerTeam != ORION_TEAM_SURVIVOR)
+    if (!Orion_IsCompetitiveTeam(entityTeam) || !Orion_IsCompetitiveTeam(observerTeam) || entityTeam == observerTeam)
     {
         return false;
     }
 
-    if (!IsPlayerAlive(entity))
+    if (!IsPlayerAlive(entity) || !IsPlayerAlive(observer))
+    {
+        return false;
+    }
+
+    if (entityTeam == ORION_TEAM_INFECTED && GetEntProp(entity, Prop_Send, "m_isGhost") == 1)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool Orion_ShouldBlockPvsTransmit(int entity, int observer)
+{
+    int currentTick = Orion_Visibility_CurrentTick();
+    if (g_OrionVisibilityLastCheckedTick[entity][observer] == currentTick)
+    {
+        return !g_OrionVisibilityIsVisible[entity][observer];
+    }
+
+    g_OrionVisibilityLastCheckedTick[entity][observer] = currentTick;
+
+    if (Orion_Visibility_IsObserverAbleToSeeTarget(observer, entity))
+    {
+        g_OrionVisibilityIsVisible[entity][observer] = true;
+        g_OrionVisibilityPvsHiddenTicks[entity][observer] = 0;
+        g_OrionVisibilityLastVisibleAt[entity][observer] = GetGameTime();
+        return false;
+    }
+
+    g_OrionVisibilityPvsHiddenTicks[entity][observer]++;
+    float lastVisibleAt = g_OrionVisibilityLastVisibleAt[entity][observer];
+    if (lastVisibleAt <= 0.0)
+    {
+        g_OrionVisibilityLastVisibleAt[entity][observer] = GetGameTime();
+        return false;
+    }
+
+    if ((GetGameTime() - lastVisibleAt) <= Orion_Config_VisibilityPvsGraceSeconds())
+    {
+        return false;
+    }
+
+    if (!Orion_Visibility_IsOutsidePvsBlockDistance(observer, entity))
+    {
+        return false;
+    }
+
+    g_OrionVisibilityIsVisible[entity][observer] = false;
+    return true;
+}
+
+bool Orion_Visibility_IsObserverAbleToSeeTarget(int observer, int target)
+{
+    float observerEyePosition[3];
+    float observerEyeAngles[3];
+    float targetEyePosition[3];
+    float targetCenter[3];
+    float targetMins[3];
+    float targetMaxs[3];
+
+    GetClientEyePosition(observer, observerEyePosition);
+    GetClientEyeAngles(observer, observerEyeAngles);
+    GetClientEyePosition(target, targetEyePosition);
+    GetClientMins(target, targetMins);
+    GetClientMaxs(target, targetMaxs);
+    Orion_Visibility_GetClientCenter(target, targetCenter);
+
+    if (!Orion_Visibility_IsInFieldOfView(observerEyePosition, observerEyeAngles, targetCenter))
+    {
+        return false;
+    }
+
+    if (Orion_Visibility_IsPointVisible(observerEyePosition, targetCenter))
     {
         return true;
+    }
+
+    if (Orion_Visibility_IsForwardVectorVisible(observerEyePosition, observerEyeAngles, targetEyePosition))
+    {
+        return true;
+    }
+
+    if (Orion_Visibility_IsRectangleVisible(observerEyePosition, targetCenter, targetMins, targetMaxs, 1.30))
+    {
+        return true;
+    }
+
+    return Orion_Visibility_IsRectangleVisible(observerEyePosition, targetCenter, targetMins, targetMaxs, 0.65);
+}
+
+void Orion_Visibility_GetClientCenter(int client, float center[3])
+{
+    float maxs[3];
+    GetClientMaxs(client, maxs);
+    GetClientAbsOrigin(client, center);
+
+    maxs[2] /= 2.0;
+    center[2] += maxs[2];
+}
+
+bool Orion_Visibility_IsOutsidePvsBlockDistance(int observer, int target)
+{
+    float observerEyePosition[3];
+    float targetCenter[3];
+    GetClientEyePosition(observer, observerEyePosition);
+    Orion_Visibility_GetClientCenter(target, targetCenter);
+    return GetVectorDistance(observerEyePosition, targetCenter) >= Orion_Config_VisibilityPvsMinBlockDistance();
+}
+
+bool Orion_Visibility_IsInFieldOfView(const float start[3], const float angles[3], const float end[3])
+{
+    float normal[3];
+    float plane[3];
+
+    GetAngleVectors(angles, normal, NULL_VECTOR, NULL_VECTOR);
+    SubtractVectors(end, start, plane);
+    NormalizeVector(plane, plane);
+
+    return GetVectorDotProduct(plane, normal) > 0.0;
+}
+
+bool Orion_Visibility_IsForwardVectorVisible(const float start[3], const float angles[3], const float end[3])
+{
+    float forwardVector[3];
+
+    GetAngleVectors(angles, forwardVector, NULL_VECTOR, NULL_VECTOR);
+    ScaleVector(forwardVector, 50.0);
+    AddVectors(end, forwardVector, forwardVector);
+
+    return Orion_Visibility_IsPointVisible(start, forwardVector);
+}
+
+bool Orion_Visibility_IsRectangleVisible(const float start[3], const float end[3], const float mins[3], const float maxs[3], float scale)
+{
+    float zPositiveOffset = maxs[2] * scale;
+    float zNegativeOffset = mins[2] * scale;
+    float wideOffset = ((maxs[0] - mins[0]) + (maxs[1] - mins[1])) / 4.0 * scale;
+
+    if (zPositiveOffset == 0.0 && zNegativeOffset == 0.0 && wideOffset == 0.0)
+    {
+        return Orion_Visibility_IsPointVisible(start, end);
+    }
+
+    float angles[3];
+    float forwardVector[3];
+    float right[3];
+    float rectangle[4][3];
+    float temp[3];
+
+    SubtractVectors(start, end, forwardVector);
+    NormalizeVector(forwardVector, forwardVector);
+    GetVectorAngles(forwardVector, angles);
+    GetAngleVectors(angles, forwardVector, right, NULL_VECTOR);
+
+    if (FloatAbs(forwardVector[2]) <= 0.7071)
+    {
+        ScaleVector(right, wideOffset);
+
+        temp = end;
+        temp[2] += zPositiveOffset;
+        AddVectors(temp, right, rectangle[0]);
+        SubtractVectors(temp, right, rectangle[1]);
+
+        temp = end;
+        temp[2] += zNegativeOffset;
+        AddVectors(temp, right, rectangle[2]);
+        SubtractVectors(temp, right, rectangle[3]);
+    }
+    else if (forwardVector[2] > 0.0)
+    {
+        forwardVector[2] = 0.0;
+        NormalizeVector(forwardVector, forwardVector);
+        ScaleVector(forwardVector, wideOffset);
+        ScaleVector(right, wideOffset);
+
+        temp = end;
+        temp[2] += zPositiveOffset;
+        AddVectors(temp, right, temp);
+        SubtractVectors(temp, forwardVector, rectangle[0]);
+
+        temp = end;
+        temp[2] += zPositiveOffset;
+        SubtractVectors(temp, right, temp);
+        SubtractVectors(temp, forwardVector, rectangle[1]);
+
+        temp = end;
+        temp[2] += zNegativeOffset;
+        AddVectors(temp, right, temp);
+        AddVectors(temp, forwardVector, rectangle[2]);
+
+        temp = end;
+        temp[2] += zNegativeOffset;
+        SubtractVectors(temp, right, temp);
+        AddVectors(temp, forwardVector, rectangle[3]);
+    }
+    else
+    {
+        forwardVector[2] = 0.0;
+        NormalizeVector(forwardVector, forwardVector);
+        ScaleVector(forwardVector, wideOffset);
+        ScaleVector(right, wideOffset);
+
+        temp = end;
+        temp[2] += zPositiveOffset;
+        AddVectors(temp, right, temp);
+        AddVectors(temp, forwardVector, rectangle[0]);
+
+        temp = end;
+        temp[2] += zPositiveOffset;
+        SubtractVectors(temp, right, temp);
+        AddVectors(temp, forwardVector, rectangle[1]);
+
+        temp = end;
+        temp[2] += zNegativeOffset;
+        AddVectors(temp, right, temp);
+        SubtractVectors(temp, forwardVector, rectangle[2]);
+
+        temp = end;
+        temp[2] += zNegativeOffset;
+        SubtractVectors(temp, right, temp);
+        SubtractVectors(temp, forwardVector, rectangle[3]);
+    }
+
+    for (int cornerIndex = 0; cornerIndex < 4; cornerIndex++)
+    {
+        if (Orion_Visibility_IsPointVisible(start, rectangle[cornerIndex]))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool Orion_Visibility_IsPointVisible(const float start[3], const float end[3])
+{
+    Orion_Visibility_ResetTraceBudgetIfNeeded();
+    if (g_OrionVisibilityTraceCount >= Orion_Config_VisibilityTraceBudgetPerTick())
+    {
+        return true;
+    }
+
+    TR_TraceRayFilter(start, end, MASK_VISIBLE, RayType_EndPoint, Orion_Visibility_FilterWorldOnly);
+    g_OrionVisibilityTraceCount++;
+
+    return TR_GetFraction() == 1.0;
+}
+
+public bool Orion_Visibility_FilterWorldOnly(int entity, int contentsMask)
+{
+    return false;
+}
+
+void Orion_Visibility_ResetTraceBudgetIfNeeded()
+{
+    int currentTick = Orion_Visibility_CurrentTick();
+    if (g_OrionVisibilityTraceTick != currentTick)
+    {
+        g_OrionVisibilityTraceTick = currentTick;
+        g_OrionVisibilityTraceCount = 0;
+    }
+}
+
+int Orion_Visibility_CurrentTick()
+{
+    return RoundToFloor(GetGameTime() / GetTickInterval());
+}
+
+bool Orion_IsCompetitiveTeam(int team)
+{
+    return team == ORION_TEAM_SURVIVOR || team == ORION_TEAM_INFECTED;
+}
+
+void Orion_Visibility_RecordAllowed(int reason)
+{
+    if (reason >= 0 && reason < view_as<int>(OrionVisibilityReason_Count))
+    {
+        g_OrionVisibilityAllowedByReason[reason]++;
+    }
+}
+
+void Orion_Visibility_RecordSuppressed(int reason)
+{
+    if (reason >= 0 && reason < view_as<int>(OrionVisibilityReason_Count))
+    {
+        g_OrionVisibilitySuppressedByReason[reason]++;
+    }
+}
+
+void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int reason, float score, bool blocked)
+{
+    g_OrionVisibilityBlocked[observer]++;
+    Orion_Visibility_RecordSuppressed(reason);
+
+    if (g_OrionVisibilityBlocked[observer] != 1 && (g_OrionVisibilityBlocked[observer] % 250) != 0)
+    {
+        return;
+    }
+
+    char reasonName[32];
+    char spawnState[32];
+    char details[256];
+    Orion_Visibility_GetReasonName(reason, reasonName, sizeof(reasonName));
+    Orion_Visibility_GetSpawnState(entity, spawnState, sizeof(spawnState));
+    Format(
+        details,
+        sizeof(details),
+        "reason=%s entity=%d team=%d spawn_state=%s blocked=%d suppressed=%d observer_blocks=%d hidden_ticks=%d",
+        reasonName,
+        entity,
+        GetClientTeam(entity),
+        spawnState,
+        blocked,
+        g_OrionVisibilitySuppressedByReason[reason],
+        g_OrionVisibilityBlocked[observer],
+        g_OrionVisibilityPvsHiddenTicks[entity][observer]);
+    Orion_Evidence_Submit(observer, "visibility_guard", score, "observe", details);
+}
+
+void Orion_Visibility_GetReasonName(int reason, char[] reasonName, int reasonNameLength)
+{
+    switch (reason)
+    {
+        case OrionVisibilityReason_Self:
+        {
+            strcopy(reasonName, reasonNameLength, "self");
+        }
+        case OrionVisibilityReason_NonHumanObserver:
+        {
+            strcopy(reasonName, reasonNameLength, "non_human_observer");
+        }
+        case OrionVisibilityReason_SpectatorObserver:
+        {
+            strcopy(reasonName, reasonNameLength, "spectator_observer");
+        }
+        case OrionVisibilityReason_AdminObserver:
+        {
+            strcopy(reasonName, reasonNameLength, "admin_observer");
+        }
+        case OrionVisibilityReason_TeamPolicy:
+        {
+            strcopy(reasonName, reasonNameLength, "team_policy");
+        }
+        case OrionVisibilityReason_GhostInfected:
+        {
+            strcopy(reasonName, reasonNameLength, "ghost_infected");
+        }
+        case OrionVisibilityReason_InactiveInfected:
+        {
+            strcopy(reasonName, reasonNameLength, "inactive_infected");
+        }
+        case OrionVisibilityReason_SpawnedInfected:
+        {
+            strcopy(reasonName, reasonNameLength, "spawned_infected");
+        }
+        case OrionVisibilityReason_PvsHiddenEnemy:
+        {
+            strcopy(reasonName, reasonNameLength, "pvs_hidden_enemy");
+        }
+        default:
+        {
+            strcopy(reasonName, reasonNameLength, "invalid_entity");
+        }
+    }
+}
+
+void Orion_Visibility_GetSpawnState(int entity, char[] spawnState, int spawnStateLength)
+{
+    if (entity <= 0 || entity > MaxClients || !IsClientInGame(entity))
+    {
+        strcopy(spawnState, spawnStateLength, "invalid");
+        return;
+    }
+
+    if (!IsPlayerAlive(entity))
+    {
+        strcopy(spawnState, spawnStateLength, "inactive");
+        return;
     }
 
     if (GetEntProp(entity, Prop_Send, "m_isGhost") == 1)
     {
-        return true;
+        strcopy(spawnState, spawnStateLength, "ghost");
+        return;
     }
 
-    return false;
+    strcopy(spawnState, spawnStateLength, "spawned");
+}
+
+public Action Orion_Visibility_CommandStatus(int client, int args)
+{
+    ReplyToCommand(client, "[Orion] visibility guard counters:");
+
+    char reasonName[32];
+    for (int reason = 0; reason < view_as<int>(OrionVisibilityReason_Count); reason++)
+    {
+        Orion_Visibility_GetReasonName(reason, reasonName, sizeof(reasonName));
+        ReplyToCommand(
+            client,
+            "[Orion] reason=%s allowed=%d suppressed=%d",
+            reasonName,
+            g_OrionVisibilityAllowedByReason[reason],
+            g_OrionVisibilitySuppressedByReason[reason]);
+    }
+
+    return Plugin_Handled;
 }

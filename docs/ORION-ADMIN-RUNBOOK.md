@@ -15,6 +15,8 @@ Keep the defaults for the first staging window:
 orion_enable "1"
 orion_mode "shadow"
 orion_visibility_guard_enable "1"
+orion_visibility_pvs_enable "1"
+orion_visibility_pvs_block_enable "0"
 orion_admin_alerts "1"
 ```
 
@@ -25,12 +27,14 @@ Run from RCON/server console:
 ```text
 sm plugins list
 find orion_
+sm_orion_visibility_status
 ```
 
 Expected:
 
 - `Project Orion` is loaded.
 - `orion_mode` reports `shadow`.
+- `sm_orion_visibility_status` prints reason-coded allowed/suppressed counters.
 - No `Unknown command` spam.
 - No `Native` errors.
 
@@ -86,4 +90,25 @@ Do not re-enable old SMAC modules during Phase 1. Orion is the replacement candi
 | basic aimbot/autoshoot/aimlock | `orion_aim_analyzer` | rolling evidence score |
 | bhop/macro/strafe automation | `orion_movement_analyzer` | rolling evidence score |
 | backtrack/fakelag tick abuse | `orion_movement_analyzer` + `orion_backtrack_patch_enable` | score suspicious drift |
-| wallhack/ESP mitigation | `orion_visibility_guard` | suppress ghost infected transmit |
+| wallhack/ESP mitigation | `orion_visibility_guard` | suppress ghost/inactive infected; log SMAC-style PVS-hidden enemy evidence |
+
+## Phase 3 visibility guard staging
+
+The Phase 3 visibility guard is intentionally defensive and conservative. It currently:
+
+- suppresses ghost or inactive infected player transmission to live survivors;
+- keeps spectators and dead admin observers usable for review workflows;
+- runs LOS/FOV trace checks for spawned enemy players and logs `reason=spawned_infected` PVS-hidden evidence;
+- leaves spawned-enemy PVS blocking disabled by default through `orion_visibility_pvs_block_enable "0"`;
+- fails open on trace-budget exhaustion instead of risking gameplay breakage;
+- exposes reason-coded counters through `sm_orion_visibility_status`.
+
+During staging, run one clean scrim and one controlled visual-cheat lab session with separate `sm_orion_session` labels, then capture:
+
+```text
+sm_orion_visibility_status
+```
+
+Review the counter mix before any broader transmit policy is enabled. `visibility_guard` evidence proves data minimization activity only; it is not ban proof by itself.
+
+Only enable `orion_visibility_pvs_block_enable "1"` on staging after a clean scrim corpus shows no false positives for normal holds, ghost spawns, spectators, and admin review.

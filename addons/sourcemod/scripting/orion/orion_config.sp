@@ -4,6 +4,11 @@ ConVar g_OrionAimScoreThreshold = null;
 ConVar g_OrionMovementScoreThreshold = null;
 ConVar g_OrionIntegrityScoreThreshold = null;
 ConVar g_OrionVisibilityGuardEnable = null;
+ConVar g_OrionVisibilityPvsEnable = null;
+ConVar g_OrionVisibilityPvsBlockEnable = null;
+ConVar g_OrionVisibilityPvsGraceSeconds = null;
+ConVar g_OrionVisibilityPvsMinBlockDistance = null;
+ConVar g_OrionVisibilityTraceBudgetPerTick = null;
 ConVar g_OrionAdminAlerts = null;
 ConVar g_OrionMaxLerpMs = null;
 ConVar g_OrionMaxInterpRatio = null;
@@ -29,6 +34,11 @@ void Orion_Config_Init()
     g_OrionMovementScoreThreshold = CreateConVar("orion_movement_score_threshold", "75.0", "Movement evidence score required for high-confidence findings.", _, true, 0.0, true, 100.0);
     g_OrionIntegrityScoreThreshold = CreateConVar("orion_integrity_score_threshold", "70.0", "Client integrity score required for high-confidence findings.", _, true, 0.0, true, 100.0);
     g_OrionVisibilityGuardEnable = CreateConVar("orion_visibility_guard_enable", "1", "Enable ghost infected transmit suppression.", _, true, 0.0, true, 1.0);
+    g_OrionVisibilityPvsEnable = CreateConVar("orion_visibility_pvs_enable", "1", "Enable L4D2 PVS visibility evidence for enemy player transmit decisions.", _, true, 0.0, true, 1.0);
+    g_OrionVisibilityPvsBlockEnable = CreateConVar("orion_visibility_pvs_block_enable", "0", "Block enemy player transmit when Orion PVS proves the target is not visible.", _, true, 0.0, true, 1.0);
+    g_OrionVisibilityPvsGraceSeconds = CreateConVar("orion_visibility_pvs_grace_seconds", "3.0", "Seconds to keep enemy transmit after last proven visibility.", _, true, 0.0, true, 10.0);
+    g_OrionVisibilityPvsMinBlockDistance = CreateConVar("orion_visibility_pvs_min_block_distance", "900.0", "Minimum enemy distance before PVS block mode may suppress transmit.", _, true, 0.0, true, 5000.0);
+    g_OrionVisibilityTraceBudgetPerTick = CreateConVar("orion_visibility_trace_budget_per_tick", "512", "Maximum Orion visibility traces per server tick before fail-open.", _, true, 1.0, true, 4096.0);
     g_OrionAdminAlerts = CreateConVar("orion_admin_alerts", "1", "Alert admins for high-confidence Orion evidence.", _, true, 0.0, true, 1.0);
     g_OrionMaxLerpMs = CreateConVar("orion_max_lerp_ms", "150.0", "Maximum allowed client interpolation in milliseconds.", _, true, 0.0, true, 500.0);
     g_OrionMaxInterpRatio = CreateConVar("orion_max_interp_ratio", "2.0", "Maximum allowed cl_interp_ratio.", _, true, 0.0, true, 10.0);
@@ -55,6 +65,31 @@ bool Orion_Config_IsEnabled()
 bool Orion_Config_VisibilityGuardEnabled()
 {
     return g_OrionVisibilityGuardEnable != null && g_OrionVisibilityGuardEnable.BoolValue;
+}
+
+bool Orion_Config_VisibilityPvsEnabled()
+{
+    return g_OrionVisibilityPvsEnable != null && g_OrionVisibilityPvsEnable.BoolValue;
+}
+
+bool Orion_Config_VisibilityPvsBlockEnabled()
+{
+    return g_OrionVisibilityPvsBlockEnable != null && g_OrionVisibilityPvsBlockEnable.BoolValue;
+}
+
+float Orion_Config_VisibilityPvsGraceSeconds()
+{
+    return g_OrionVisibilityPvsGraceSeconds.FloatValue;
+}
+
+float Orion_Config_VisibilityPvsMinBlockDistance()
+{
+    return g_OrionVisibilityPvsMinBlockDistance.FloatValue;
+}
+
+int Orion_Config_VisibilityTraceBudgetPerTick()
+{
+    return g_OrionVisibilityTraceBudgetPerTick.IntValue;
 }
 
 bool Orion_Config_AdminAlertsEnabled()
