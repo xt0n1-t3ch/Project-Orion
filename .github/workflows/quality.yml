@@ -1,0 +1,39 @@
+name: quality
+
+on:
+  push:
+    branches:
+      - main
+      - refactor/project-orion-phase-1
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sourcepawn:
+    name: SourcePawn SM ${{ matrix.sourcemod }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sourcemod:
+          - "1.11"
+          - "1.12"
+          - "1.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rumblefrog/setup-sp@master
+        with:
+          version: ${{ matrix.sourcemod }}
+      - name: Compile Project Orion
+        run: spcomp -E -w234 -w217 -O2 -v2 addons/sourcemod/scripting/orion.sp
+
+  python:
+    name: Python validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run tests
+        run: python -m unittest discover -s tests -p "test_*.py"
