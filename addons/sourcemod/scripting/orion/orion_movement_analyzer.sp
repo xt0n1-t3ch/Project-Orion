@@ -14,6 +14,9 @@ int g_OrionMoveLagExploitStreak[MAXPLAYERS + 1];
 int g_OrionMoveLastTick[MAXPLAYERS + 1];
 int g_OrionMoveLastServerTick[MAXPLAYERS + 1];
 int g_OrionMoveLastTickDrift[MAXPLAYERS + 1];
+int g_OrionMoveLastTickDriftDeviation[MAXPLAYERS + 1];
+float g_OrionMoveBaselineTickDrift[MAXPLAYERS + 1];
+int g_OrionMoveBaselineTickDriftSamples[MAXPLAYERS + 1];
 int g_OrionMoveAllowedPastTickDrift[MAXPLAYERS + 1];
 int g_OrionMoveAllowedFutureTickDrift[MAXPLAYERS + 1];
 int g_OrionMoveBasePastTickDrift[MAXPLAYERS + 1];
@@ -49,6 +52,29 @@ float g_OrionMoveLossPercent[MAXPLAYERS + 1];
 #define ORION_MOVE_AUTOTRIGGER_SCORE 5.5
 #define ORION_MOVE_TICK_DRIFT_SCORE 8.0
 
+// Tickbase baseline model (kills the #1 false positive).
+//
+// A legit client's usercmd tickcount is NOT equal to the server tick: it sits
+// at a roughly constant offset set by the client clock, latency, and interp.
+// Scoring the absolute drift banned honest players (e.g. a steady -23 offset).
+// Instead we LEARN each client's natural offset and score only the DEVIATION
+// from it. A lag/backtrack/fakeping exploit shows up as a sudden or oscillating
+// deviation from the learned baseline; a constant offset converges to baseline
+// and scores nothing.
+//
+// Warmup: number of valid samples folded before the baseline may judge a frame.
+#define ORION_MOVE_TICKDRIFT_BASELINE_WARMUP_SAMPLES 64
+// EMA weight applied to each in-window sample once warmed up (slow, so a brief
+// exploit cannot drag the baseline onto itself; anomalies are never folded).
+#define ORION_MOVE_TICKDRIFT_BASELINE_ALPHA 0.05
+// |drift| beyond this is a state artifact (just spawned, map change, idle leak),
+// never a real exploit: reseed the baseline and never score the frame. ~10s @30t.
+#define ORION_MOVE_TICKDRIFT_SANITY_TICKS 300
+// Deviation (after baseline) that, with a sustained streak, makes a tick-drift
+// finding ban-grade. The baseline absorbs the constant offset, so this is the
+// genuine anomaly magnitude, not the raw drift.
+#define ORION_MOVE_TICKDRIFT_BAN_DEVIATION_TICKS 12
+
 void Orion_Movement_Init()
 {
 }
@@ -71,6 +97,9 @@ void Orion_Movement_ResetClient(int client)
     g_OrionMoveLastTick[client] = 0;
     g_OrionMoveLastServerTick[client] = 0;
     g_OrionMoveLastTickDrift[client] = 0;
+    g_OrionMoveLastTickDriftDeviation[client] = 0;
+    g_OrionMoveBaselineTickDrift[client] = 0.0;
+    g_OrionMoveBaselineTickDriftSamples[client] = 0;
     g_OrionMoveAllowedPastTickDrift[client] = 0;
     g_OrionMoveAllowedFutureTickDrift[client] = 0;
     g_OrionMoveBasePastTickDrift[client] = 0;
@@ -129,6 +158,16 @@ void Orion_Movement_OnPlayerRunCmd(int client, int buttons, float angles[3], int
 
 void Orion_Movement_ScoreCommandClock(int client, int buttons, int commandNumber, int& tickcount, int& seed, float currentSpeed)
 {
+    // Synthetic/idle/just-spawned frames (commandNumber or tickcount of 0) carry
+    // no real client command. Scoring them is the root of the tick-drift ban
+    // storm, so skip all command-clock anomaly scoring here and clear the reuse
+    // streak so an idle gap cannot inflate it.
+    if (!Orion_IsActiveCommandSample(commandNumber, tickcount))
+    {
+        g_OrionMoveCommandRepeatStreak[client] = 0;
+        return;
+    }
+
     int commandGap = 0;
     if (g_OrionMoveLastCommandNumber[client] > 0)
     {
@@ -237,6 +276,32 @@ void Orion_Movement_ScoreTickDrift(int client, int buttons, int& tickcount, int&
 {
     int serverTick = GetGameTickCount();
     int tickDrift = tickcount - serverTick;
+    g_OrionMoveLastTickDrift[client] = tickDrift;
+
+    // A wildly large drift is a state artifact (just spawned, map change, idle
+    // leak), never a real exploit. Reseed the baseline to it and never score
+    // the frame; the model relearns the client's offset cleanly from here.
+    if (Orion_AbsInt(tickDrift) > ORION_MOVE_TICKDRIFT_SANITY_TICKS)
+    {
+        g_OrionMoveBaselineTickDrift[client] = float(tickDrift);
+        g_OrionMoveBaselineTickDriftSamples[client] = 1;
+        g_OrionMoveLastTickDriftDeviation[client] = 0;
+        return;
+    }
+
+    // Warmup: learn the client's natural, constant offset (clock + latency +
+    // interp) before judging any frame against it.
+    if (g_OrionMoveBaselineTickDriftSamples[client] < ORION_MOVE_TICKDRIFT_BASELINE_WARMUP_SAMPLES)
+    {
+        Orion_Movement_FoldTickDriftBaseline(client, tickDrift);
+        g_OrionMoveLastTickDriftDeviation[client] = 0;
+        return;
+    }
+
+    int baselineDrift = RoundToNearest(g_OrionMoveBaselineTickDrift[client]);
+    int deviation = tickDrift - baselineDrift;
+    g_OrionMoveLastTickDriftDeviation[client] = deviation;
+
     int configuredToleranceTicks = Orion_Config_BacktrackToleranceTicks();
     int baseAllowedPastDriftTicks = configuredToleranceTicks;
     int baseAllowedFutureDriftTicks = configuredToleranceTicks + 4;
@@ -251,15 +316,19 @@ void Orion_Movement_ScoreTickDrift(int client, int buttons, int& tickcount, int&
         + Orion_Movement_MinInt(latencyAllowanceTicks / 2, 6)
         + 4;
 
-    g_OrionMoveLastTickDrift[client] = tickDrift;
     g_OrionMoveAllowedPastTickDrift[client] = allowedPastDriftTicks;
     g_OrionMoveAllowedFutureTickDrift[client] = allowedFutureDriftTicks;
     g_OrionMoveBasePastTickDrift[client] = baseAllowedPastDriftTicks;
     g_OrionMoveBaseFutureTickDrift[client] = baseAllowedFutureDriftTicks;
 
-    if (tickDrift >= -allowedPastDriftTicks && tickDrift <= allowedFutureDriftTicks)
+    // Deviation from the learned baseline is what matters, not the raw drift.
+    // Inside the network-aware window this is a normal frame: fold it into the
+    // baseline (slow EMA) and only watch for the masked fake-lag pattern.
+    if (deviation >= -allowedPastDriftTicks && deviation <= allowedFutureDriftTicks)
     {
-        bool isOutsideBaseWindow = tickDrift < -baseAllowedPastDriftTicks || tickDrift > baseAllowedFutureDriftTicks;
+        Orion_Movement_FoldTickDriftBaseline(client, tickDrift);
+
+        bool isOutsideBaseWindow = deviation < -baseAllowedPastDriftTicks || deviation > baseAllowedFutureDriftTicks;
         if (isOutsideBaseWindow
             && g_OrionMoveChokePercent[client] >= ORION_MOVE_FAKE_LAG_CHOKE_PERCENT
             && g_OrionMoveLossPercent[client] <= ORION_MOVE_FAKE_LAG_LOW_LOSS_PERCENT)
@@ -280,12 +349,22 @@ void Orion_Movement_ScoreTickDrift(int client, int buttons, int& tickcount, int&
         return;
     }
 
+    // Deviation outside the window: the client clock jumped away from its own
+    // learned baseline. This is the genuine lag/backtrack/fakeping signature.
+    // Freeze the baseline (do NOT fold this frame) so the exploit cannot train
+    // the model onto itself, then score the anomaly magnitude.
     g_OrionMoveLagExploitStreak[client]++;
-    int driftExcessTicks = tickDrift < 0 ? (-tickDrift - allowedPastDriftTicks) : (tickDrift - allowedFutureDriftTicks);
-    Orion_Movement_AddScore(client, ORION_MOVE_TICK_DRIFT_SCORE + float(Orion_Movement_MinInt(driftExcessTicks, 12)));
+    int deviationExcessTicks = deviation < 0
+        ? (-deviation - allowedPastDriftTicks)
+        : (deviation - allowedFutureDriftTicks);
+    Orion_Movement_AddScore(client, ORION_MOVE_TICK_DRIFT_SCORE + float(Orion_Movement_MinInt(deviationExcessTicks, 12)));
     if (Orion_Config_HardMitigationEnabled())
     {
-        tickcount = tickDrift < 0 ? serverTick - allowedPastDriftTicks : serverTick + allowedFutureDriftTicks;
+        // Clamp back toward the client's learned baseline, not toward raw server
+        // tick, so the legit offset is preserved and a clean client never jumps.
+        tickcount = deviation < 0
+            ? serverTick + baselineDrift - allowedPastDriftTicks
+            : serverTick + baselineDrift + allowedFutureDriftTicks;
         if ((buttons & IN_ATTACK) != 0)
         {
             seed = GetRandomInt(1, 2147483647);
@@ -294,6 +373,29 @@ void Orion_Movement_ScoreTickDrift(int client, int buttons, int& tickcount, int&
 
     Orion_Movement_ReportIfNeeded(client, "command_tick_drift", tickcount, currentSpeed);
     Orion_Movement_ReportLagExploitIfNeeded(client, "fakeping_tick_drift", tickcount, currentSpeed);
+}
+
+/**
+ * Folds one in-window drift sample into the per-client baseline.
+ *
+ * During warmup a simple running mean gives a fast, unbiased initial fit; once
+ * warmed up a slow EMA tracks gradual clock changes while staying too sluggish
+ * for a brief exploit to drag the baseline onto itself. Anomalous frames are
+ * never passed here, so the model only ever learns from normal play.
+ */
+void Orion_Movement_FoldTickDriftBaseline(int client, int tickDrift)
+{
+    int samples = g_OrionMoveBaselineTickDriftSamples[client];
+    if (samples < ORION_MOVE_TICKDRIFT_BASELINE_WARMUP_SAMPLES)
+    {
+        g_OrionMoveBaselineTickDrift[client] =
+            (g_OrionMoveBaselineTickDrift[client] * float(samples) + float(tickDrift)) / float(samples + 1);
+        g_OrionMoveBaselineTickDriftSamples[client] = samples + 1;
+        return;
+    }
+
+    g_OrionMoveBaselineTickDrift[client] +=
+        ORION_MOVE_TICKDRIFT_BASELINE_ALPHA * (float(tickDrift) - g_OrionMoveBaselineTickDrift[client]);
 }
 
 void Orion_Movement_ScoreSpeedhackBucket(int client, int tickcount, float currentSpeed)
@@ -497,7 +599,7 @@ void Orion_Movement_ReportIfNeeded(int client, const char[] reason, int tickcoun
     Format(
         details,
         sizeof(details),
-        "reason=%s tick=%d perfect_jump_streak=%d jump_release_streak=%d repeat_streak=%d command_regression_streak=%d command_gap_streak=%d masked_gap_streak=%d masked_drift_streak=%d lag_exploit_streak=%d command_gap=%d allowed_command_gap=%d tick_drift=%d base_past_drift=%d base_future_drift=%d allowed_past_drift=%d allowed_future_drift=%d speed=%.1f speedhack_tokens=%.1f allowed_speedhack_tokens=%.1f latency_ms=%.1f choke_pct=%.1f loss_pct=%.1f",
+        "reason=%s tick=%d perfect_jump_streak=%d jump_release_streak=%d repeat_streak=%d command_regression_streak=%d command_gap_streak=%d masked_gap_streak=%d masked_drift_streak=%d lag_exploit_streak=%d command_gap=%d allowed_command_gap=%d tick_drift=%d tick_drift_deviation=%d baseline_drift=%.1f base_past_drift=%d base_future_drift=%d allowed_past_drift=%d allowed_future_drift=%d speed=%.1f speedhack_tokens=%.1f allowed_speedhack_tokens=%.1f latency_ms=%.1f choke_pct=%.1f loss_pct=%.1f",
         reason,
         tickcount,
         g_OrionMovePerfectJumpStreak[client],
@@ -511,6 +613,8 @@ void Orion_Movement_ReportIfNeeded(int client, const char[] reason, int tickcoun
         g_OrionMoveLastCommandGap[client],
         g_OrionMoveAllowedCommandGap[client],
         g_OrionMoveLastTickDrift[client],
+        g_OrionMoveLastTickDriftDeviation[client],
+        g_OrionMoveBaselineTickDrift[client],
         g_OrionMoveBasePastTickDrift[client],
         g_OrionMoveBaseFutureTickDrift[client],
         g_OrionMoveAllowedPastTickDrift[client],
@@ -582,7 +686,12 @@ bool Orion_Movement_IsBanEligible(int client, const char[] reason)
 
     if (StrEqual(reason, "command_tick_drift", false))
     {
-        return g_OrionMoveLagExploitStreak[client] >= ORION_MOVE_LAG_EXPLOIT_STREAK_MIN || Orion_AbsInt(g_OrionMoveLastTickDrift[client]) >= 16;
+        // Ban-grade only when the client clock sustains a real deviation from
+        // its own learned baseline. A constant offset converges to baseline and
+        // yields deviation 0, so it can never reach this gate (the old absolute
+        // `|drift| >= 16` check is what banned honest, high-latency players).
+        return g_OrionMoveLagExploitStreak[client] >= ORION_MOVE_LAG_EXPLOIT_STREAK_MIN
+            && Orion_AbsInt(g_OrionMoveLastTickDriftDeviation[client]) >= ORION_MOVE_TICKDRIFT_BAN_DEVIATION_TICKS;
     }
 
     if (StrEqual(reason, "repeated_tickcount", false))

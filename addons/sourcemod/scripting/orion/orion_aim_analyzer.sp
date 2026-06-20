@@ -271,14 +271,18 @@ void Orion_Aim_ScoreAngleHistory(int client, int target, float pitchDelta, float
 
     float scoreDelta = 0.0;
 
-    if (snap2Delta >= ORION_AIM_SNAP2_HIGH_DELTA)
+    // A sharp 2-tick snap is only suspicious when it lands ON a valid target the
+    // player just acquired (target_ticks<=1). Raw turn magnitude with no target
+    // under the crosshair is a normal human flick and must NOT score — that, plus
+    // treating mouse==0 as proof, was the 180-degree false positive that banned
+    // legit players. mouse==0 is unreliable in L4D2 (controllers/configs report
+    // it legitimately), so here it only nudges the weight; it never carries a ban
+    // on its own. The bare accumulated-window-delta path is removed entirely; the
+    // real silent-aim signal is the served-angle-vs-hit mismatch (aim integrity
+    // phase) and the fire-tick attack window, not how far the view swept.
+    if (hasValidTarget && g_OrionAimTargetTicks[client] <= 1 && snap2Delta >= ORION_AIM_SNAP2_HIGH_DELTA)
     {
-        scoreDelta += mouseMagnitude <= 2 ? 18.0 : 10.0;
-    }
-
-    if (windowDelta >= ORION_AIM_WINDOW_HIGH_DELTA)
-    {
-        scoreDelta += mouseMagnitude <= 3 ? 15.0 : 8.0;
+        scoreDelta += mouseMagnitude <= 2 ? 12.0 : 8.0;
     }
 
     if (g_OrionAimAngleRepeatStreak[client] >= 5)

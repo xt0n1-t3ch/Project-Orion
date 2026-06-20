@@ -191,3 +191,21 @@ int Orion_AbsInt(int value)
 {
     return value < 0 ? -value : value;
 }
+
+/**
+ * True when a usercmd carries real client input that is safe to score.
+ *
+ * The engine feeds OnPlayerRunCmd synthetic/empty commands during idle,
+ * loading, paused, and just-spawned states; those arrive with a command
+ * number or tickcount of zero, frozen angles, and no buttons. Scoring them
+ * is the single biggest source of false positives: a tickcount of 0 makes
+ * tick-drift read as the entire server uptime (e.g. -8158), banning every
+ * tick. The Reborn client base guards the exact same way (it skips a frame
+ * unless command_number != 0), so this is the canonical "is this a real,
+ * player-authored command" gate. ONE owner, consumed by every per-tick
+ * analyzer, so the contract can never diverge between modules again.
+ */
+bool Orion_IsActiveCommandSample(int commandNumber, int tickcount)
+{
+    return commandNumber > 0 && tickcount > 0;
+}

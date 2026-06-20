@@ -334,7 +334,10 @@ bool Orion_UserCmdGuard_IsLagExploitReason(const char[] reason)
 
 bool Orion_UserCmdGuard_IsBanEligible(int client, int commandNumber, int tickcount)
 {
-    if (commandNumber <= 0 || tickcount <= 0 || g_OrionUserCmdScore[client] < Orion_Config_EnforceThreshold(Orion_Config_IntegrityThreshold()))
+    // Same canonical "real client command" gate the movement analyzer uses, so
+    // the two modules can never disagree about what counts as a scorable sample.
+    if (!Orion_IsActiveCommandSample(commandNumber, tickcount)
+        || g_OrionUserCmdScore[client] < Orion_Config_EnforceThreshold(Orion_Config_IntegrityThreshold()))
     {
         return false;
     }
