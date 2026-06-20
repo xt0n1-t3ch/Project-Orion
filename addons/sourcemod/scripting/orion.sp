@@ -68,6 +68,7 @@ public void OnPluginStart()
 public void OnMapStart()
 {
     Orion_Evidence_OnMapStart();
+    Orion_Visibility_OnMapStart();
 }
 
 public void OnClientPutInServer(int client)
@@ -83,6 +84,7 @@ public void OnClientDisconnect(int client)
     Orion_Aim_ResetClient(client);
     Orion_Movement_ResetClient(client);
     Orion_Integrity_ResetClient(client);
+    Orion_Visibility_ResetClient(client);
 }
 
 public Action OnPlayerRunCmd(

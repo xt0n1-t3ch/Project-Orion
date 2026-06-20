@@ -41,7 +41,7 @@ Use these keys when adding new SourcePawn evidence. The parser accepts unknown k
 | `network` | `reason` | `ping_ms`, `loss_percent`, `choke_percent`, `tick_drift` |
 | `chat_guard` | `reason` | `message_length`, `control_chars`, `blocked` |
 | `name_guard` | `reason` | `name_length`, `control_chars`, `blocked` |
-| `visibility_guard` | `reason`, `entity` | `class`, `team`, `spawn_state`, `blocked` |
+| `visibility_guard` | `reason`, `entity` | `class`, `team`, `spawn_state`, `blocked`, `suppressed`, `observer_blocks`, `hidden_ticks` |
 
 ## Calibration session labels
 
