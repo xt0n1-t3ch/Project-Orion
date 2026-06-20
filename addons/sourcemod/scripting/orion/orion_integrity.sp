@@ -31,19 +31,14 @@ public Action Orion_Integrity_Timer(Handle timer)
     {
         if (Orion_IsHumanPlayer(client))
         {
-            QueryClientConVar(client, "cl_interp", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "cl_interp_ratio", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "cl_lagcompensation", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "cl_predict", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "sv_cheats", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "mat_wireframe", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "mat_proxy", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "mat_fullbright", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "r_drawothermodels", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "r_drawmodelstatsoverlay", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "r_drawrenderboxes", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "r_drawentities", Orion_Integrity_OnClientConVar);
-            QueryClientConVar(client, "snd_visualize", Orion_Integrity_OnClientConVar);
+            char cvarName[64];
+            for (int queryIndex = 0; queryIndex < 8; queryIndex++)
+            {
+                if (Orion_CvarPolicy_QueryNext(client, cvarName, sizeof(cvarName)))
+                {
+                    QueryClientConVar(client, cvarName, Orion_Integrity_OnClientConVar);
+                }
+            }
         }
     }
 
@@ -98,61 +93,15 @@ public void Orion_Integrity_OnClientConVar(QueryCookie cookie, int client, ConVa
         return;
     }
 
-    if (result != ConVarQuery_Okay)
+    float scoreDelta = 0.0;
+    char reason[64];
+    char actionLabel[16];
+    char expectedLabel[64];
+    if (Orion_CvarPolicy_HandleResult(client, result, cvarName, cvarValue, scoreDelta, reason, sizeof(reason), actionLabel, sizeof(actionLabel), expectedLabel, sizeof(expectedLabel)))
     {
-        g_OrionIntegrityScore[client] += 2.0;
-        Orion_Integrity_ReportIfNeeded(client, "query_failed", cvarName, cvarValue);
-        return;
+        g_OrionIntegrityScore[client] += scoreDelta;
+        Orion_Integrity_ReportIfNeeded(client, reason, cvarName, cvarValue, expectedLabel);
     }
-
-    float floatValue = StringToFloat(cvarValue);
-
-    if (StrEqual(cvarName, "cl_interp", false))
-    {
-        float lerpMs = floatValue * 1000.0;
-        if (lerpMs > Orion_Config_MaxLerpMs())
-        {
-            g_OrionIntegrityScore[client] += 25.0;
-            Orion_Integrity_ReportIfNeeded(client, "lerp_high", cvarName, cvarValue);
-        }
-    }
-    else if (StrEqual(cvarName, "cl_interp_ratio", false))
-    {
-        if (floatValue > Orion_Config_MaxInterpRatio() || floatValue < Orion_Config_MinInterpRatio())
-        {
-            g_OrionIntegrityScore[client] += 20.0;
-            Orion_Integrity_ReportIfNeeded(client, "interp_ratio_out_of_bounds", cvarName, cvarValue);
-        }
-    }
-    else if (StrEqual(cvarName, "cl_lagcompensation", false) || StrEqual(cvarName, "cl_predict", false))
-    {
-        if (floatValue < 0.0 || floatValue > 1.0)
-        {
-            g_OrionIntegrityScore[client] += 15.0;
-            Orion_Integrity_ReportIfNeeded(client, "prediction_cvar_out_of_bounds", cvarName, cvarValue);
-        }
-    }
-    else if (Orion_Integrity_IsForbiddenVisualConVar(cvarName))
-    {
-        if (floatValue > 0.0)
-        {
-            g_OrionIntegrityScore[client] += 30.0;
-            Orion_Integrity_ReportIfNeeded(client, "forbidden_visual_cvar", cvarName, cvarValue);
-        }
-    }
-}
-
-bool Orion_Integrity_IsForbiddenVisualConVar(const char[] cvarName)
-{
-    return StrEqual(cvarName, "sv_cheats", false)
-        || StrEqual(cvarName, "mat_wireframe", false)
-        || StrEqual(cvarName, "mat_proxy", false)
-        || StrEqual(cvarName, "mat_fullbright", false)
-        || StrEqual(cvarName, "r_drawothermodels", false)
-        || StrEqual(cvarName, "r_drawmodelstatsoverlay", false)
-        || StrEqual(cvarName, "r_drawrenderboxes", false)
-        || StrEqual(cvarName, "r_drawentities", false)
-        || StrEqual(cvarName, "snd_visualize", false);
 }
 
 public Action Orion_Integrity_OnClientSayCommand(int client, const char[] command, const char[] message)
@@ -219,7 +168,7 @@ int Orion_Integrity_CountControlCharacters(const char[] text)
     return count;
 }
 
-void Orion_Integrity_ReportIfNeeded(int client, const char[] reason, const char[] cvarName, const char[] cvarValue)
+void Orion_Integrity_ReportIfNeeded(int client, const char[] reason, const char[] cvarName, const char[] cvarValue, const char[] expectedLabel)
 {
     float alertThreshold = Orion_Config_IntegrityThreshold();
     if (g_OrionIntegrityScore[client] < alertThreshold)
@@ -228,7 +177,7 @@ void Orion_Integrity_ReportIfNeeded(int client, const char[] reason, const char[
     }
 
     char details[256];
-    Format(details, sizeof(details), "reason=%s cvar=%s value=%s", reason, cvarName, cvarValue);
+    Format(details, sizeof(details), "reason=%s cvar=%s value=%s expected=%s", reason, cvarName, cvarValue, expectedLabel);
 
     char action[16];
     strcopy(action, sizeof(action), g_OrionIntegrityScore[client] >= Orion_Config_EnforceThreshold(alertThreshold) ? "ban" : "observe");
