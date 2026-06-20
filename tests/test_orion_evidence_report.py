@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 
 from scripts.orion_evidence_report import (
+    build_corpus_summary,
     group_orion_evidence,
     parse_orion_evidence_line,
     parse_orion_evidence_lines,
@@ -111,6 +112,46 @@ class OrionEvidenceReportTests(unittest.TestCase):
         self.assertEqual(summary["session"]["record_count"], 1)
         self.assertTrue(summary["players"][0]["steamid"].startswith("steamid_sha256:"))
         self.assertIn("reborn-perfect-silent-lab", csv_text)
+        self.assertIn("family,severity,false_positive_candidate", csv_text)
+
+    def test_corpus_summary_exposes_session_counts_severity_and_false_positive_gate(self) -> None:
+        records = parse_orion_evidence_lines(
+            [
+                'seq=1 session=clean_scrim type=aim score=88.0 action=observe client=1 steamid=STEAM_1:0:10 name="clean" map=c1m1_hotel mode=shadow details="family=aimbot reason=clean_high_angle"',
+                'seq=2 session=clean_scrim type=aim score=92.0 action=ban client=1 steamid=STEAM_1:0:10 name="clean" map=c1m1_hotel mode=shadow details="family=aimbot reason=clean_ban"',
+                'seq=3 session=reborn_psilent type=aim score=96.0 action=ban client=2 steamid=STEAM_1:0:20 name="lab" map=c1m2_streets mode=shadow details="family=aimbot reason=silent"',
+                'seq=4 session=reborn_bhop type=movement score=62.0 action=observe client=3 steamid=STEAM_1:0:30 name="lab2" map=c1m3_mall mode=shadow details="reason=jump_window"',
+            ]
+        )
+
+        summary = build_corpus_summary(
+            records,
+            session_label="mixed-live-corpus",
+            server_label="BLACKWATCH",
+            min_score=0,
+            redact_steamids=False,
+            redaction_salt="test-salt",
+        )
+
+        self.assertEqual(summary["counts"]["by_family"], {"aimbot": 3, "movement": 1})
+        self.assertEqual(summary["counts"]["by_family_action"], {"aimbot:ban": 2, "aimbot:observe": 1, "movement:observe": 1})
+        self.assertEqual(summary["counts"]["by_severity"], {"critical": 2, "high": 1, "medium": 1})
+
+        clean_session = next(session for session in summary["session_summaries"] if session["session"] == "clean_scrim")
+        self.assertEqual(clean_session["record_count"], 2)
+        self.assertEqual(clean_session["counts"]["by_action"], {"ban": 1, "observe": 1})
+        self.assertEqual(clean_session["counts"]["by_severity"], {"critical": 1, "high": 1})
+        self.assertTrue(clean_session["is_clean_session"])
+
+        gate = summary["false_positive_gate"]
+        self.assertEqual(gate["status"], "fail")
+        self.assertEqual(gate["candidate_count"], 2)
+        self.assertEqual(gate["enforcement_candidate_count"], 1)
+        self.assertEqual(gate["max_clean_score"], 92.0)
+        self.assertEqual(gate["candidates"][0]["family"], "aimbot")
+        self.assertEqual(gate["candidates"][0]["severity"], "critical")
+        self.assertEqual(summary["events"][0]["family"], "aimbot")
+        self.assertTrue(summary["events"][0]["false_positive_candidate"])
 
 
 if __name__ == "__main__":

@@ -9,9 +9,11 @@ enum OrionCvarComparisonKind
 
 #define ORION_CVAR_POLICY_INVALID_INDEX -1
 #define ORION_CVAR_POLICY_VALUE_EPSILON 0.001
+#define ORION_CVAR_POLICY_MAX_PENDING_QUERIES 8
 
 int g_OrionCvarPolicyNextIndex[MAXPLAYERS + 1];
 int g_OrionCvarPolicyPendingIndex[MAXPLAYERS + 1];
+int g_OrionCvarPolicyPendingCount[MAXPLAYERS + 1];
 int g_OrionCvarPolicyConsecutiveFailures[MAXPLAYERS + 1];
 
 char g_OrionCvarPolicyNames[][] =
@@ -367,12 +369,13 @@ void Orion_CvarPolicy_ResetClient(int client)
 
     g_OrionCvarPolicyNextIndex[client] = 0;
     g_OrionCvarPolicyPendingIndex[client] = ORION_CVAR_POLICY_INVALID_INDEX;
+    g_OrionCvarPolicyPendingCount[client] = 0;
     g_OrionCvarPolicyConsecutiveFailures[client] = 0;
 }
 
 bool Orion_CvarPolicy_QueryNext(int client, char[] cvarName, int cvarNameLength)
 {
-    if (!Orion_CvarPolicy_IsValidClientSlot(client) || cvarNameLength <= 0 || g_OrionCvarPolicyPendingIndex[client] != ORION_CVAR_POLICY_INVALID_INDEX)
+    if (!Orion_CvarPolicy_IsValidClientSlot(client) || cvarNameLength <= 0 || g_OrionCvarPolicyPendingCount[client] >= ORION_CVAR_POLICY_MAX_PENDING_QUERIES)
     {
         return false;
     }
@@ -385,6 +388,7 @@ bool Orion_CvarPolicy_QueryNext(int client, char[] cvarName, int cvarNameLength)
 
     strcopy(cvarName, cvarNameLength, g_OrionCvarPolicyNames[policyIndex]);
     g_OrionCvarPolicyPendingIndex[client] = policyIndex;
+    g_OrionCvarPolicyPendingCount[client]++;
     g_OrionCvarPolicyNextIndex[client] = (policyIndex + 1) % Orion_CvarPolicy_Count();
     return true;
 }
@@ -510,7 +514,17 @@ bool Orion_CvarPolicy_IsValidClientSlot(int client)
 
 void Orion_CvarPolicy_ClearPendingQuery(int client, int policyIndex)
 {
+    if (g_OrionCvarPolicyPendingCount[client] > 0)
+    {
+        g_OrionCvarPolicyPendingCount[client]--;
+    }
+
     if (g_OrionCvarPolicyPendingIndex[client] == policyIndex)
+    {
+        g_OrionCvarPolicyPendingIndex[client] = ORION_CVAR_POLICY_INVALID_INDEX;
+    }
+
+    if (g_OrionCvarPolicyPendingCount[client] <= 0)
     {
         g_OrionCvarPolicyPendingIndex[client] = ORION_CVAR_POLICY_INVALID_INDEX;
     }

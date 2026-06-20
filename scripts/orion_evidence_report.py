@@ -17,6 +17,15 @@ from typing import Iterable, TextIO
 ORION_RECORD_START = "seq="
 STEAM_ID_PATTERN = re.compile(r"^STEAM_[0-5]:[0-1]:\d+$")
 SOURCE_LOG_PREFIX_PATTERN = re.compile(r'^L \d{2}/\d{2}/\d{4} - \d{2}:\d{2}:\d{2}: "?')
+DEFAULT_FALSE_POSITIVE_REVIEW_SCORE = 50.0
+SEVERITY_BUCKET_FLOORS = (
+    ("critical", 90.0),
+    ("high", 75.0),
+    ("medium", 50.0),
+    ("low", 0.0),
+)
+CLEAN_SESSION_HINTS = ("clean", "control", "legit", "baseline", "negative", "vanilla")
+ENFORCEMENT_ACTIONS = frozenset({"ban", "kick", "block", "quarantine"})
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,7 @@ class OrionEvidenceRecord:
 class OrionEvidenceGroup:
     session: str
     evidence_type: str
+    evidence_family: str
     steamid: str
     player_name: str
     action: str
@@ -174,21 +184,49 @@ def display_steamid(steamid: str, *, redact_steamids: bool, redaction_salt: str)
     return steamid
 
 
+def evidence_family_for_record(record: OrionEvidenceRecord) -> str:
+    return record.details.get("family") or record.evidence_type or "unknown"
+
+
+def severity_bucket_for_score(score: float) -> str:
+    for severity, floor in SEVERITY_BUCKET_FLOORS:
+        if score >= floor:
+            return severity
+    return "low"
+
+
+def is_clean_session(session: str) -> bool:
+    normalized_session = session.lower()
+    return any(hint in normalized_session for hint in CLEAN_SESSION_HINTS)
+
+
+def is_enforcement_action(action: str) -> bool:
+    return action.lower() in ENFORCEMENT_ACTIONS
+
+
+def is_false_positive_candidate(record: OrionEvidenceRecord, *, review_score_floor: float) -> bool:
+    return is_clean_session(record.session) and (
+        record.score >= review_score_floor or is_enforcement_action(record.action)
+    )
+
+
 def group_orion_evidence(
     records: Iterable[OrionEvidenceRecord],
     *,
     redact_steamids: bool = False,
     redaction_salt: str = "project-orion",
 ) -> list[OrionEvidenceGroup]:
-    groups: dict[tuple[str, str, str, str], OrionEvidenceGroup] = {}
+    groups: dict[tuple[str, str, str, str, str], OrionEvidenceGroup] = {}
 
     for record in records:
         steamid = display_steamid(record.steamid, redact_steamids=redact_steamids, redaction_salt=redaction_salt)
-        group_key = (record.session, record.evidence_type, steamid, record.action)
+        evidence_family = evidence_family_for_record(record)
+        group_key = (record.session, record.evidence_type, evidence_family, steamid, record.action)
         if group_key not in groups:
             groups[group_key] = OrionEvidenceGroup(
                 session=record.session,
                 evidence_type=record.evidence_type,
+                evidence_family=evidence_family,
                 steamid=steamid,
                 player_name=record.player_name,
                 action=record.action,
@@ -208,6 +246,7 @@ def evidence_record_to_dict(
     *,
     redact_steamids: bool,
     redaction_salt: str,
+    false_positive_review_score: float = DEFAULT_FALSE_POSITIVE_REVIEW_SCORE,
 ) -> dict[str, object]:
     return {
         "session": record.session,
@@ -215,6 +254,13 @@ def evidence_record_to_dict(
         "source_line": record.source_line,
         "seq": record.sequence,
         "type": record.evidence_type,
+        "family": evidence_family_for_record(record),
+        "severity": severity_bucket_for_score(record.score),
+        "false_positive_candidate": is_false_positive_candidate(
+            record,
+            review_score_floor=false_positive_review_score,
+        ),
+        "is_clean_session": is_clean_session(record.session),
         "score": record.score,
         "action": record.action,
         "client": record.client,
@@ -226,6 +272,105 @@ def evidence_record_to_dict(
     }
 
 
+def build_session_summary(records: list[OrionEvidenceRecord], *, review_score_floor: float) -> dict[str, object]:
+    family_counts = Counter(evidence_family_for_record(record) for record in records)
+    type_counts = Counter(record.evidence_type for record in records)
+    action_counts = Counter(record.action for record in records)
+    severity_counts = Counter(severity_bucket_for_score(record.score) for record in records)
+    map_counts = Counter(record.map_name for record in records)
+    scores = [record.score for record in records]
+
+    return {
+        "session": records[0].session,
+        "record_count": len(records),
+        "is_clean_session": is_clean_session(records[0].session),
+        "max_score": max(scores),
+        "average_score": round(sum(scores) / len(scores), 3),
+        "counts": {
+            "by_family": dict(sorted(family_counts.items())),
+            "by_type": dict(sorted(type_counts.items())),
+            "by_action": dict(sorted(action_counts.items())),
+            "by_severity": dict(sorted(severity_counts.items())),
+            "by_map": dict(sorted(map_counts.items())),
+        },
+        "false_positive_candidate_count": sum(
+            1 for record in records if is_false_positive_candidate(record, review_score_floor=review_score_floor)
+        ),
+    }
+
+
+def build_session_summaries(
+    records: list[OrionEvidenceRecord],
+    *,
+    review_score_floor: float,
+) -> list[dict[str, object]]:
+    records_by_session: dict[str, list[OrionEvidenceRecord]] = defaultdict(list)
+    for record in records:
+        records_by_session[record.session].append(record)
+
+    return [
+        build_session_summary(session_records, review_score_floor=review_score_floor)
+        for _, session_records in sorted(records_by_session.items())
+    ]
+
+
+def build_false_positive_gate(
+    records: list[OrionEvidenceRecord],
+    *,
+    redact_steamids: bool,
+    redaction_salt: str,
+    review_score_floor: float,
+) -> dict[str, object]:
+    clean_session_records = [record for record in records if is_clean_session(record.session)]
+    candidate_records = [
+        record
+        for record in clean_session_records
+        if is_false_positive_candidate(record, review_score_floor=review_score_floor)
+    ]
+    sorted_candidate_records = sorted(
+        candidate_records,
+        key=lambda record: (-record.score, record.source_line, record.sequence or 0),
+    )
+    enforcement_candidate_count = sum(1 for record in candidate_records if is_enforcement_action(record.action))
+
+    if enforcement_candidate_count:
+        status = "fail"
+    elif candidate_records:
+        status = "warn"
+    else:
+        status = "pass"
+
+    return {
+        "status": status,
+        "review_score_floor": review_score_floor,
+        "clean_session_hints": list(CLEAN_SESSION_HINTS),
+        "clean_session_count": len({record.session for record in clean_session_records}),
+        "max_clean_score": max((record.score for record in clean_session_records), default=None),
+        "candidate_count": len(candidate_records),
+        "enforcement_candidate_count": enforcement_candidate_count,
+        "candidates": [
+            {
+                "session": record.session,
+                "source_line": record.source_line,
+                "seq": record.sequence,
+                "type": record.evidence_type,
+                "family": evidence_family_for_record(record),
+                "severity": severity_bucket_for_score(record.score),
+                "score": record.score,
+                "action": record.action,
+                "steamid": display_steamid(
+                    record.steamid,
+                    redact_steamids=redact_steamids,
+                    redaction_salt=redaction_salt,
+                ),
+                "map": record.map_name,
+                "reason": record.details.get("reason", ""),
+            }
+            for record in sorted_candidate_records
+        ],
+    }
+
+
 def build_corpus_summary(
     records: list[OrionEvidenceRecord],
     *,
@@ -234,17 +379,28 @@ def build_corpus_summary(
     min_score: float,
     redact_steamids: bool,
     redaction_salt: str,
+    false_positive_review_score: float = DEFAULT_FALSE_POSITIVE_REVIEW_SCORE,
 ) -> dict[str, object]:
     filtered_records = [record for record in records if record.score >= min_score]
     events = [
-        evidence_record_to_dict(record, redact_steamids=redact_steamids, redaction_salt=redaction_salt)
+        evidence_record_to_dict(
+            record,
+            redact_steamids=redact_steamids,
+            redaction_salt=redaction_salt,
+            false_positive_review_score=false_positive_review_score,
+        )
         for record in filtered_records
     ]
 
+    family_counts = Counter(evidence_family_for_record(record) for record in filtered_records)
     type_counts = Counter(record.evidence_type for record in filtered_records)
     action_counts = Counter(record.action for record in filtered_records)
     mode_counts = Counter(record.mode for record in filtered_records)
     map_counts = Counter(record.map_name for record in filtered_records)
+    severity_counts = Counter(severity_bucket_for_score(record.score) for record in filtered_records)
+    family_action_counts = Counter(
+        f"{evidence_family_for_record(record)}:{record.action}" for record in filtered_records
+    )
 
     score_by_type: dict[str, list[float]] = defaultdict(list)
     player_event_counts: Counter[str] = Counter()
@@ -266,11 +422,24 @@ def build_corpus_summary(
             "redacted_steamids": redact_steamids,
         },
         "counts": {
+            "by_family": dict(sorted(family_counts.items())),
             "by_type": dict(sorted(type_counts.items())),
             "by_action": dict(sorted(action_counts.items())),
+            "by_family_action": dict(sorted(family_action_counts.items())),
+            "by_severity": dict(sorted(severity_counts.items())),
             "by_mode": dict(sorted(mode_counts.items())),
             "by_map": dict(sorted(map_counts.items())),
         },
+        "session_summaries": build_session_summaries(
+            filtered_records,
+            review_score_floor=false_positive_review_score,
+        ),
+        "false_positive_gate": build_false_positive_gate(
+            filtered_records,
+            redact_steamids=redact_steamids,
+            redaction_salt=redaction_salt,
+            review_score_floor=false_positive_review_score,
+        ),
         "score_summary_by_type": {
             evidence_type: {
                 "count": len(scores),
@@ -293,12 +462,31 @@ def build_corpus_summary(
 
 def write_csv_report(groups: Iterable[OrionEvidenceGroup], output: TextIO) -> None:
     writer = csv.writer(output)
-    writer.writerow(["session", "type", "steamid", "name", "action", "count", "max_score", "last_map", "last_details"])
+    writer.writerow(
+        [
+            "session",
+            "type",
+            "family",
+            "severity",
+            "false_positive_candidate",
+            "steamid",
+            "name",
+            "action",
+            "count",
+            "max_score",
+            "last_map",
+            "last_details",
+        ]
+    )
     for group in groups:
         writer.writerow(
             [
                 group.session,
                 group.evidence_type,
+                group.evidence_family,
+                severity_bucket_for_score(group.max_score),
+                is_clean_session(group.session)
+                and (group.max_score >= DEFAULT_FALSE_POSITIVE_REVIEW_SCORE or is_enforcement_action(group.action)),
                 group.steamid,
                 group.player_name,
                 group.action,
@@ -311,12 +499,16 @@ def write_csv_report(groups: Iterable[OrionEvidenceGroup], output: TextIO) -> No
 
 
 def write_markdown_report(groups: Iterable[OrionEvidenceGroup], output: TextIO) -> None:
-    output.write("| Session | Type | SteamID | Name | Action | Count | Max score | Last map | Last details |\n")
-    output.write("|---|---|---|---|---|---:|---:|---|---|\n")
+    output.write(
+        "| Session | Type | Family | Severity | False-positive candidate | SteamID | Name | Action | Count | Max score | Last map | Last details |\n"
+    )
+    output.write("|---|---|---|---|---|---|---|---|---:|---:|---|---|\n")
     for group in groups:
         output.write(
-            f"| {group.session} | {group.evidence_type} | {group.steamid} | {group.player_name} | "
-            f"{group.action} | {group.count} | {group.max_score:.1f} | {group.last_map_name} | "
+            f"| {group.session} | {group.evidence_type} | {group.evidence_family} | "
+            f"{severity_bucket_for_score(group.max_score)} | "
+            f"{is_clean_session(group.session) and (group.max_score >= DEFAULT_FALSE_POSITIVE_REVIEW_SCORE or is_enforcement_action(group.action))} | "
+            f"{group.steamid} | {group.player_name} | {group.action} | {group.count} | {group.max_score:.1f} | {group.last_map_name} | "
             f"{json.dumps(group.last_details, sort_keys=True)} |\n"
         )
 
@@ -328,6 +520,10 @@ def write_event_csv(events: Iterable[dict[str, object]], output_path: Path) -> N
         "source_line",
         "seq",
         "type",
+        "family",
+        "severity",
+        "false_positive_candidate",
+        "is_clean_session",
         "score",
         "action",
         "client",
@@ -357,6 +553,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--csv-out", type=Path, help="Write flat event-ledger CSV to this path")
     parser.add_argument("--redact-steamids", action="store_true", help="Pseudonymize SteamIDs in report output")
     parser.add_argument("--redaction-salt", default="project-orion", help="Salt used for deterministic SteamID pseudonyms")
+    parser.add_argument(
+        "--false-positive-review-score",
+        type=float,
+        default=DEFAULT_FALSE_POSITIVE_REVIEW_SCORE,
+        help="Score floor for flagging clean/control session events for false-positive review",
+    )
     return parser.parse_args()
 
 
@@ -374,6 +576,7 @@ def main() -> int:
         min_score=args.min_score,
         redact_steamids=args.redact_steamids,
         redaction_salt=args.redaction_salt,
+        false_positive_review_score=args.false_positive_review_score,
     )
 
     if args.json_out is not None:
