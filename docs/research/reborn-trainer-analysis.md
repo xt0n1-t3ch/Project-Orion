@@ -54,12 +54,33 @@ Defensive meaning: this is a classic DLL injection loader. A game server will no
 
 Observed feature clusters:
 
-- Aim: `Aimbot`, `Silent`, `Perfect Silent`, `Human`, `Aim Mode`, `Only Aim`, `Aimbot Bone`, `Bestbone`, `Nospread and Aimbot Smooth dont go well together`.
-- Visuals: `Chams`, `Glow`, `EntityGlowEffects`, `RenderGlowModels`, `MaterialHack conflicts with Glow`, `DME Chams conflict with Glow`, `Hitbox face alpha colors`.
-- Weapon manipulation: `Nospread makes your bullets go in pinpoint accuracy`, `Legit Nospread conflicts with Perfect Silent`, `Autoshoot feature requires Rapidfire`.
-- Movement/exploit: `Fakelag`, `Fake Angle Z`, `Strafe`, `Spawn anywhere in Versus mode`, `Hold Lagexploit hotkey until you near humans`.
+- Aim: `Aimbot`, `Silent`, `Perfect Silent`, `Humanized`, `Aimbot Bone`, `Bestbone`, `Always Silent`, `Silent Autoshove`, `Autoknife`, and warnings that fake-team/fakelag/nospread conflict with silent aim.
+- Visuals: `Chams`, `Extended Chams`, `Glow`, `EntityGlowEffects`, `RenderGlowModels`, `MaterialHack conflicts with Glow`, `DME Chams conflict with Glow`, `Hitboxes`, and `Hitbox face alpha colors`.
+- Weapon manipulation: `No Spread`, `Minigun No Spread`, `No Recoil`, `No Visual Recoil`, `Rapid Fire`, `Always Recoil/Spread/Rapid fire`, and text that nospread makes bullets pinpoint-accurate.
+- Movement/exploit: `Bunnyhop`, `Humanized bhop`, `Rage Bunnyhop`, `Strafe`, `Fakelag`, `Backtrack`, `Fake Angle`, `Teleport`, `Spawn anywhere in Versus mode`, and `Hold Lagexploit hotkey until you near humans`.
 - Game state: `client.dll`, `m_hActiveWeapon`, `m_hMyWeapons`, L4D2 weapon class strings such as `weapon_jockey_claw`, `weapon_charger_claw`, `weapon_smg_silenced`, `weapon_rifle_sg552`, and `weapon_smg_mp5`.
-- Observation evasion: `Anti OBS`, `Anti Discord`, and notes about non-Steam versions only supporting visuals.
+- Observation evasion: `Anti-OBS##1` through `Anti-OBS##14`, `Anti Discord`, and notes about non-Steam versions only supporting visuals.
+
+Focused string counts from `VR.dll`:
+
+| Term | Count |
+|---|---:|
+| `Aimbot` | 35 |
+| `Silent` | 29 |
+| `Perfect Silent` | 7 |
+| `Nospread` / `No Spread` | 19 |
+| `No Recoil` | 1 |
+| `Bunnyhop` / `Humanized bhop` | 5 |
+| `Strafe` | 5 |
+| `Fakelag` | 3 |
+| `Backtrack` | 26 |
+| `Glow` | 36 |
+| `Chams` | 41 |
+| `Anti-OBS` | 20 |
+| `Fake Angle` | 10 |
+| `Teleport` | 9 |
+| `Rapid Fire` | 3 |
+| `Autoshove` | 10 |
 
 Defensive meaning: this trainer spans render overlays, aim manipulation, weapon outcome manipulation, and movement/exploit assistance. Orion needs multiple independent evidence channels rather than a single aimbot detector.
 
@@ -76,10 +97,12 @@ The tool name and included instructions say to run the MD5 changer against the i
 | Silent aim | command/view manipulation with target hit despite non-human aim transition | attack windows, angle deltas, target switch timing, hit/death correlation | `orion_aim_analyzer` |
 | Perfect silent aim | stronger variant with hidden crosshair movement | repeated one-tick acquisition and hit correlation | `orion_aim_analyzer` high-confidence tier |
 | Humanized aim | smoothed aim assist to avoid snap checks | long-window target tracking consistency and unlikely acquisition rates | rolling aim score with decay |
-| Nospread | client command/seed/weapon manipulation or prediction abuse | improbable hit clusters by weapon/range/movement | shot probability scoring in aim analyzer |
+| Nospread | client command/seed/weapon manipulation or prediction abuse | improbable hit clusters by weapon/range/movement | hurt/death correlation, airborne/fast-shot scoring, and future weapon-probability corpus |
 | No recoil | view/recoil compensation | less visible than nospread; detectable statistically over repeated fire | long-window weapon outcome scoring |
 | Auto-bhop / macro | timed jump input and strafe assistance | usercmd buttons, flags, speed, ground contact | `orion_movement_analyzer` |
 | Fakelag / backtrack | tick/latency/interp manipulation | tickcount repeats, lerp/interp values, impossible hit windows | movement + integrity analyzer |
+| Fake angles / spin | manipulated usercmd view angles | impossible pitch/roll, mouse/angle mismatch | angle guard and aim evidence |
+| Chat/name abuse | chat-clear payloads and invalid display names | SourceMod chat/name hooks | integrity guard |
 | Anti-OBS / Discord | overlay capture hiding | not server-side observable | server evidence only |
 
 ## Requirements derived for Orion

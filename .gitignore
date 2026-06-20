@@ -17,3 +17,9 @@ __pycache__/
 *.key
 *.pem
 .env
+
+# Private operator notes and local reverse-engineering helpers.
+AGENTS.md
+CLAUDE.md
+tools/
+tests/test_reborn_analysis.py
