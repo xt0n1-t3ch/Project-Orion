@@ -19,6 +19,10 @@ ConVar g_OrionMinInterpRatio = null;
 ConVar g_OrionAngleGuardEnable = null;
 ConVar g_OrionChatGuardEnable = null;
 ConVar g_OrionNameGuardEnable = null;
+ConVar g_OrionVocalizeGuardEnable = null;
+ConVar g_OrionVocalizeBudget = null;
+ConVar g_OrionVocalizeCooldownSeconds = null;
+ConVar g_OrionVocalizeAlertsBeforeKick = null;
 ConVar g_OrionBacktrackPatchEnable = null;
 ConVar g_OrionBacktrackToleranceTicks = null;
 ConVar g_OrionHardMitigationEnable = null;
@@ -52,6 +56,10 @@ void Orion_Config_Init()
     g_OrionAngleGuardEnable = CreateConVar("orion_angle_guard_enable", "1", "Score and patch impossible client view angles.", _, true, 0.0, true, 1.0);
     g_OrionChatGuardEnable = CreateConVar("orion_chat_guard_enable", "1", "Block chat-clear/control-character abuse.", _, true, 0.0, true, 1.0);
     g_OrionNameGuardEnable = CreateConVar("orion_name_guard_enable", "1", "Score newline/control-character names.", _, true, 0.0, true, 1.0);
+    g_OrionVocalizeGuardEnable = CreateConVar("orion_vocalize_guard_enable", "1", "Detect and punish vocalize spam (radial-menu/voice command flooding).", _, true, 0.0, true, 1.0);
+    g_OrionVocalizeBudget = CreateConVar("orion_vocalize_budget", "5", "Vocalizes a player may use in a burst before spam alerts begin.", _, true, 1.0, true, 50.0);
+    g_OrionVocalizeCooldownSeconds = CreateConVar("orion_vocalize_cooldown_seconds", "3.0", "Quiet seconds after the budget that forgive the burst; vocalizing before it elapses counts as spam.", _, true, 0.5, true, 30.0);
+    g_OrionVocalizeAlertsBeforeKick = CreateConVar("orion_vocalize_alerts_before_kick", "3", "Spam alerts a player accumulates before Orion kicks them; 0 disables the kick.", _, true, 0.0, true, 20.0);
     g_OrionBacktrackPatchEnable = CreateConVar("orion_backtrack_patch_enable", "1", "Score suspicious command tick drift/backtrack windows.", _, true, 0.0, true, 1.0);
     g_OrionBacktrackToleranceTicks = CreateConVar("orion_backtrack_tolerance_ticks", "2", "Allowed command tick drift before backtrack evidence is scored.", _, true, 0.0, true, 16.0);
     g_OrionHardMitigationEnable = CreateConVar("orion_hard_mitigation_enable", "1", "Allow Orion to patch unsafe usercmd values outside shadow mode.", _, true, 0.0, true, 1.0);
@@ -195,6 +203,26 @@ bool Orion_Config_ChatGuardEnabled()
 bool Orion_Config_NameGuardEnabled()
 {
     return g_OrionNameGuardEnable != null && g_OrionNameGuardEnable.BoolValue;
+}
+
+bool Orion_Config_VocalizeGuardEnabled()
+{
+    return g_OrionVocalizeGuardEnable != null && g_OrionVocalizeGuardEnable.BoolValue;
+}
+
+int Orion_Config_VocalizeBudget()
+{
+    return g_OrionVocalizeBudget.IntValue;
+}
+
+float Orion_Config_VocalizeCooldownSeconds()
+{
+    return g_OrionVocalizeCooldownSeconds.FloatValue;
+}
+
+int Orion_Config_VocalizeAlertsBeforeKick()
+{
+    return g_OrionVocalizeAlertsBeforeKick.IntValue;
 }
 
 bool Orion_Config_BacktrackPatchEnabled()
