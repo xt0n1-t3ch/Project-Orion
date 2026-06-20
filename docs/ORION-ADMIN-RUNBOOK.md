@@ -38,12 +38,28 @@ Expected:
 
 Evidence is written to `addons/sourcemod/logs/orion.log`.
 
+Set a session label before controlled lab or clean-corpus runs:
+
+```text
+sm_orion_session reborn_psilent_round1
+sm_orion_status
+```
+
 Review for:
 
 - repeated high scores against the same SteamID;
 - correlation between aim/movement/integrity evidence;
 - ping/loss context before action;
 - demos or admin observations for high-impact bans.
+
+Summarize a downloaded log into a calibration report:
+
+```powershell
+python scripts/orion_evidence_report.py .\orion.log --session-label reborn_psilent_round1 --json-out .\corpus.json --csv-out .\corpus.csv
+python scripts/orion_evidence_report.py .\orion.log --session-label clean_scrim_round1 --min-score 50 --redact-steamids --json-out .\clean-corpus.json
+```
+
+Use separate session labels for clean and cheat-controlled runs, for example `clean_scrim_round1`, `reborn_glow_round1`, `reborn_psilent_round1`, and `reborn_bhop_round1`.
 
 ## Mode ladder
 

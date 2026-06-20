@@ -37,6 +37,15 @@ Project Orion Phase 1 is a server-side SourceMod anti-cheat for competitive Left
 
 Phase 1 covers Lilac's public feature classes: angle-cheat evidence, chat-clear patching, invalid cvar detection, bhop/macro evidence, aimbot/autoshoot/aimlock evidence, max interp evidence, max ping/loss evidence, backtrack/tick drift scoring, and invalid name detection. It also covers the SMAC classes relevant to L4D2 competitive servers: aimbot, wallhack/data minimization, cvars, speed/tick anomalies, spinhack-like invalid angles, and L4D2 ghost-state protection.
 
+## P0 hardening backlog
+
+The replacement path is not complete until these P0 slices are implemented and proven against BLACKWATCH corpora:
+
+- Full L4D2 wallhack/PVS transmit policy: line-of-sight/FOV trace cache, spectator/admin exceptions, weapon/entity transmit rules, and reason-coded allowed/suppressed counters.
+- Aim ring buffer parity: command-window history, shot tick lookup, hit/death correlation by exact tick window, and ping/loss weighting.
+- Nospread/norecoil probability model: weapon/range/movement buckets with rolling impossible-outcome scoring.
+- Infected movement baselines: hunter, jockey, charger, ladder, water, incap, pounce/charge/ride exceptions.
+
 ## False-positive stance
 
 `orion_mode` defaults to `shadow`. Live bans are not a Phase 1 default. A threshold can move to alert/enforce only after a staging corpus proves normal competitive play, high-skill aim, high-skill movement, spectators, admins, and high-ping players remain below enforcement thresholds.

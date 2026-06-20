@@ -13,11 +13,13 @@ ConVar g_OrionChatGuardEnable = null;
 ConVar g_OrionNameGuardEnable = null;
 ConVar g_OrionBacktrackPatchEnable = null;
 ConVar g_OrionBacktrackToleranceTicks = null;
+ConVar g_OrionHardMitigationEnable = null;
 ConVar g_OrionMaxPingMs = null;
 ConVar g_OrionMaxLossPercent = null;
 ConVar g_OrionBanMinutes = null;
 ConVar g_OrionBanProvider = null;
 ConVar g_OrionEvidenceLogLevel = null;
+ConVar g_OrionSessionLabel = null;
 
 void Orion_Config_Init()
 {
@@ -36,11 +38,13 @@ void Orion_Config_Init()
     g_OrionNameGuardEnable = CreateConVar("orion_name_guard_enable", "1", "Score newline/control-character names.", _, true, 0.0, true, 1.0);
     g_OrionBacktrackPatchEnable = CreateConVar("orion_backtrack_patch_enable", "1", "Score suspicious command tick drift/backtrack windows.", _, true, 0.0, true, 1.0);
     g_OrionBacktrackToleranceTicks = CreateConVar("orion_backtrack_tolerance_ticks", "2", "Allowed command tick drift before backtrack evidence is scored.", _, true, 0.0, true, 16.0);
+    g_OrionHardMitigationEnable = CreateConVar("orion_hard_mitigation_enable", "1", "Allow Orion to patch unsafe usercmd values outside shadow mode.", _, true, 0.0, true, 1.0);
     g_OrionMaxPingMs = CreateConVar("orion_max_ping_ms", "0", "Maximum allowed ping in milliseconds; 0 disables ping enforcement evidence.", _, true, 0.0, true, 1000.0);
     g_OrionMaxLossPercent = CreateConVar("orion_max_loss_percent", "0.0", "Maximum allowed packet loss percent; 0 disables packet-loss evidence.", _, true, 0.0, true, 100.0);
     g_OrionBanMinutes = CreateConVar("orion_ban_minutes", "0", "Ban length in minutes for enforce mode; 0 is permanent.", _, true, 0.0);
     g_OrionBanProvider = CreateConVar("orion_ban_provider", "basebans", "Ban provider label: none, basebans, or sourcebans.");
     g_OrionEvidenceLogLevel = CreateConVar("orion_evidence_log_level", "2", "Evidence verbosity: 0 off, 1 high-confidence, 2 suspicious.", _, true, 0.0, true, 2.0);
+    g_OrionSessionLabel = CreateConVar("orion_session_label", "default", "Current Project Orion calibration session label.");
 }
 
 bool Orion_Config_IsEnabled()
@@ -147,6 +151,11 @@ int Orion_Config_BacktrackToleranceTicks()
     return g_OrionBacktrackToleranceTicks.IntValue;
 }
 
+bool Orion_Config_HardMitigationEnabled()
+{
+    return g_OrionHardMitigationEnable != null && g_OrionHardMitigationEnable.BoolValue && Orion_Config_Mode() != OrionMode_Shadow;
+}
+
 float Orion_Config_MaxPingMs()
 {
     return g_OrionMaxPingMs.FloatValue;
@@ -155,4 +164,40 @@ float Orion_Config_MaxPingMs()
 float Orion_Config_MaxLossPercent()
 {
     return g_OrionMaxLossPercent.FloatValue;
+}
+
+void Orion_Config_GetSessionLabel(char[] sessionLabel, int sessionLabelLength)
+{
+    g_OrionSessionLabel.GetString(sessionLabel, sessionLabelLength);
+    Orion_Config_NormalizeLabel(sessionLabel, sessionLabelLength);
+}
+
+void Orion_Config_SetSessionLabel(const char[] sessionLabel)
+{
+    char normalizedLabel[64];
+    strcopy(normalizedLabel, sizeof(normalizedLabel), sessionLabel);
+    Orion_Config_NormalizeLabel(normalizedLabel, sizeof(normalizedLabel));
+    g_OrionSessionLabel.SetString(normalizedLabel);
+}
+
+void Orion_Config_NormalizeLabel(char[] sessionLabel, int sessionLabelLength)
+{
+    bool hasVisibleCharacter = false;
+
+    for (int index = 0; index < sessionLabelLength && sessionLabel[index] != '\0'; index++)
+    {
+        if (sessionLabel[index] <= 32 || sessionLabel[index] == '"' || sessionLabel[index] == '\'' || sessionLabel[index] == '=')
+        {
+            sessionLabel[index] = '_';
+        }
+        else
+        {
+            hasVisibleCharacter = true;
+        }
+    }
+
+    if (!hasVisibleCharacter)
+    {
+        strcopy(sessionLabel, sessionLabelLength, "default");
+    }
 }
