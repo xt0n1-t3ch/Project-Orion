@@ -25,7 +25,7 @@ void Orion_Movement_ResetClient(int client)
     g_OrionMoveLastSpeed[client] = 0.0;
 }
 
-void Orion_Movement_OnPlayerRunCmd(int client, int buttons, float angles[3], int commandNumber, int tickcount, int seed)
+void Orion_Movement_OnPlayerRunCmd(int client, int buttons, float angles[3], int commandNumber, int& tickcount, int& seed)
 {
     if (!Orion_IsAliveHumanPlayer(client))
     {
@@ -43,7 +43,7 @@ void Orion_Movement_OnPlayerRunCmd(int client, int buttons, float angles[3], int
         Orion_Movement_ScoreJump(client, tickcount, onGround, currentSpeed);
     }
 
-    Orion_Movement_ScoreCommandClock(client, commandNumber, tickcount, seed, currentSpeed);
+    Orion_Movement_ScoreCommandClock(client, buttons, commandNumber, tickcount, seed, currentSpeed);
     Orion_Movement_ScoreSpeedWindow(client, currentSpeed, onGround, angles, tickcount);
 
     g_OrionMoveLastButtons[client] = buttons;
@@ -53,7 +53,7 @@ void Orion_Movement_OnPlayerRunCmd(int client, int buttons, float angles[3], int
     Orion_Movement_Decay(client);
 }
 
-void Orion_Movement_ScoreCommandClock(int client, int commandNumber, int tickcount, int seed, float currentSpeed)
+void Orion_Movement_ScoreCommandClock(int client, int buttons, int commandNumber, int& tickcount, int& seed, float currentSpeed)
 {
     if (tickcount == g_OrionMoveLastTick[client] || seed == 0)
     {
@@ -61,6 +61,10 @@ void Orion_Movement_ScoreCommandClock(int client, int commandNumber, int tickcou
         if (g_OrionMoveCommandRepeatStreak[client] > 8)
         {
             g_OrionMoveScore[client] += 10.0;
+            if (Orion_Config_HardMitigationEnabled() && (buttons & IN_ATTACK) != 0)
+            {
+                seed = GetRandomInt(1, 2147483647);
+            }
             Orion_Movement_ReportIfNeeded(client, "repeated_tickcount", tickcount, currentSpeed);
         }
     }
@@ -87,6 +91,14 @@ void Orion_Movement_ScoreCommandClock(int client, int commandNumber, int tickcou
         if (tickDrift < -allowedDriftTicks || tickDrift > (allowedDriftTicks + 12))
         {
             g_OrionMoveScore[client] += 8.0;
+            if (Orion_Config_HardMitigationEnabled())
+            {
+                tickcount = serverTick - allowedDriftTicks;
+                if ((buttons & IN_ATTACK) != 0)
+                {
+                    seed = GetRandomInt(1, 2147483647);
+                }
+            }
             Orion_Movement_ReportIfNeeded(client, "command_tick_drift", tickcount, currentSpeed);
         }
     }

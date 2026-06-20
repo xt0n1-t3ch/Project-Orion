@@ -4,6 +4,8 @@ int g_OrionEvidenceSequence = 0;
 void Orion_Evidence_Init()
 {
     BuildPath(Path_SM, g_OrionEvidenceLogPath, sizeof(g_OrionEvidenceLogPath), "logs/orion.log");
+    RegAdminCmd("sm_orion_session", Orion_Evidence_CommandSession, ADMFLAG_GENERIC, "Set or show the current Project Orion calibration session label.");
+    RegAdminCmd("sm_orion_status", Orion_Evidence_CommandStatus, ADMFLAG_GENERIC, "Show Project Orion mode and calibration session.");
 }
 
 void Orion_Evidence_OnMapStart()
@@ -27,15 +29,18 @@ void Orion_Evidence_Submit(int client, const char[] evidenceType, float score, c
     char playerName[MAX_NAME_LENGTH];
     char mapName[64];
     char modeName[32];
+    char sessionLabel[64];
     Orion_Evidence_GetClientIdentity(client, authId, sizeof(authId), playerName, sizeof(playerName));
     GetCurrentMap(mapName, sizeof(mapName));
     Orion_Config_GetModeName(modeName, sizeof(modeName));
+    Orion_Config_GetSessionLabel(sessionLabel, sizeof(sessionLabel));
 
     g_OrionEvidenceSequence++;
     LogToFileEx(
         g_OrionEvidenceLogPath,
-        "seq=%d type=%s score=%.1f action=%s client=%N steamid=%s name=\"%s\" map=%s mode=%s details=\"%s\"",
+        "seq=%d session=%s type=%s score=%.1f action=%s client=%N steamid=%s name=\"%s\" map=%s mode=%s details=\"%s\"",
         g_OrionEvidenceSequence,
+        sessionLabel,
         evidenceType,
         score,
         action,
@@ -47,6 +52,34 @@ void Orion_Evidence_Submit(int client, const char[] evidenceType, float score, c
         details);
 
     Orion_Evidence_AlertOrEnforce(client, evidenceType, score, action, details);
+}
+
+public Action Orion_Evidence_CommandSession(int client, int args)
+{
+    char sessionLabel[64];
+
+    if (args <= 0)
+    {
+        Orion_Config_GetSessionLabel(sessionLabel, sizeof(sessionLabel));
+        ReplyToCommand(client, "[Orion] session=%s", sessionLabel);
+        return Plugin_Handled;
+    }
+
+    GetCmdArgString(sessionLabel, sizeof(sessionLabel));
+    Orion_Config_SetSessionLabel(sessionLabel);
+    Orion_Config_GetSessionLabel(sessionLabel, sizeof(sessionLabel));
+    ReplyToCommand(client, "[Orion] session set to %s", sessionLabel);
+    return Plugin_Handled;
+}
+
+public Action Orion_Evidence_CommandStatus(int client, int args)
+{
+    char modeName[32];
+    char sessionLabel[64];
+    Orion_Config_GetModeName(modeName, sizeof(modeName));
+    Orion_Config_GetSessionLabel(sessionLabel, sizeof(sessionLabel));
+    ReplyToCommand(client, "[Orion] enabled=%d mode=%s session=%s", Orion_Config_IsEnabled(), modeName, sessionLabel);
+    return Plugin_Handled;
 }
 
 void Orion_Evidence_AlertOrEnforce(int client, const char[] evidenceType, float score, const char[] action, const char[] details)

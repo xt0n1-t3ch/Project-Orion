@@ -107,8 +107,25 @@ void Orion_Aim_ScoreInvalidAngles(int client, float angles[3], int tickcount)
     g_OrionAimScore[client] += hasImpossiblePitch && hasImpossibleRoll ? 35.0 : 22.0;
 
     char details[256];
-    Format(details, sizeof(details), "reason=invalid_angles pitch=%.2f yaw=%.2f roll=%.2f tick=%d", angles[0], angles[1], angles[2], tickcount);
+    Format(details, sizeof(details), "reason=invalid_angles pitch=%.2f yaw=%.2f roll=%.2f tick=%d patched=%d", angles[0], angles[1], angles[2], tickcount, Orion_Config_HardMitigationEnabled());
     Orion_Evidence_Submit(client, "angle_guard", g_OrionAimScore[client], "observe", details);
+
+    if (Orion_Config_HardMitigationEnabled())
+    {
+        if (angles[0] > 89.0)
+        {
+            angles[0] = 89.0;
+        }
+        else if (angles[0] < -89.0)
+        {
+            angles[0] = -89.0;
+        }
+
+        if (angles[2] > 50.0 || angles[2] < -50.0)
+        {
+            angles[2] = 0.0;
+        }
+    }
 }
 
 void Orion_Aim_ScoreAttackWindow(int client, int target, float angleDelta, int mouseMagnitude, int tickcount)

@@ -37,7 +37,13 @@ public Action Orion_Integrity_Timer(Handle timer)
             QueryClientConVar(client, "cl_predict", Orion_Integrity_OnClientConVar);
             QueryClientConVar(client, "sv_cheats", Orion_Integrity_OnClientConVar);
             QueryClientConVar(client, "mat_wireframe", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "mat_proxy", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "mat_fullbright", Orion_Integrity_OnClientConVar);
             QueryClientConVar(client, "r_drawothermodels", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "r_drawmodelstatsoverlay", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "r_drawrenderboxes", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "r_drawentities", Orion_Integrity_OnClientConVar);
+            QueryClientConVar(client, "snd_visualize", Orion_Integrity_OnClientConVar);
         }
     }
 
@@ -126,7 +132,7 @@ public void Orion_Integrity_OnClientConVar(QueryCookie cookie, int client, ConVa
             Orion_Integrity_ReportIfNeeded(client, "prediction_cvar_out_of_bounds", cvarName, cvarValue);
         }
     }
-    else if (StrEqual(cvarName, "sv_cheats", false) || StrEqual(cvarName, "mat_wireframe", false) || StrEqual(cvarName, "r_drawothermodels", false))
+    else if (Orion_Integrity_IsForbiddenVisualConVar(cvarName))
     {
         if (floatValue > 0.0)
         {
@@ -134,6 +140,19 @@ public void Orion_Integrity_OnClientConVar(QueryCookie cookie, int client, ConVa
             Orion_Integrity_ReportIfNeeded(client, "forbidden_visual_cvar", cvarName, cvarValue);
         }
     }
+}
+
+bool Orion_Integrity_IsForbiddenVisualConVar(const char[] cvarName)
+{
+    return StrEqual(cvarName, "sv_cheats", false)
+        || StrEqual(cvarName, "mat_wireframe", false)
+        || StrEqual(cvarName, "mat_proxy", false)
+        || StrEqual(cvarName, "mat_fullbright", false)
+        || StrEqual(cvarName, "r_drawothermodels", false)
+        || StrEqual(cvarName, "r_drawmodelstatsoverlay", false)
+        || StrEqual(cvarName, "r_drawrenderboxes", false)
+        || StrEqual(cvarName, "r_drawentities", false)
+        || StrEqual(cvarName, "snd_visualize", false);
 }
 
 public Action Orion_Integrity_OnClientSayCommand(int client, const char[] command, const char[] message)
