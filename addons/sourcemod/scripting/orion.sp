@@ -10,7 +10,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define ORION_PLUGIN_VERSION "0.5.0"
+#define ORION_PLUGIN_VERSION "0.5.1"
 #define ORION_TEAM_SPECTATOR 1
 #define ORION_TEAM_SURVIVOR 2
 #define ORION_TEAM_INFECTED 3

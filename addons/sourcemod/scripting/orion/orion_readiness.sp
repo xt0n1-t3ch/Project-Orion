@@ -105,6 +105,12 @@ void Orion_Readiness_GetStatusName(char[] statusName, int statusNameLength)
         return;
     }
 
+    if (Orion_Config_Mode() == OrionMode_Alert)
+    {
+        strcopy(statusName, statusNameLength, "alert_ready");
+        return;
+    }
+
     strcopy(statusName, statusNameLength, "shadow_ready");
 }
 
