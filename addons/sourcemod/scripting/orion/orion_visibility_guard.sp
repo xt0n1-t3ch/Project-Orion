@@ -23,8 +23,12 @@ int g_OrionVisibilityLastCheckedTick[MAXPLAYERS + 1][MAXPLAYERS + 1];
 bool g_OrionVisibilityIsVisible[MAXPLAYERS + 1][MAXPLAYERS + 1];
 float g_OrionVisibilityLastVisibleAt[MAXPLAYERS + 1][MAXPLAYERS + 1];
 int g_OrionVisibilityLastSpawnReportTick[MAXPLAYERS + 1];
+int g_OrionVisibilitySuppressedSinceTelemetry[MAXPLAYERS + 1];
+float g_OrionVisibilityLastTelemetryAt[MAXPLAYERS + 1];
 int g_OrionVisibilityTraceTick = -1;
 int g_OrionVisibilityTraceCount = 0;
+
+#define ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS 30.0
 
 void Orion_Visibility_Init()
 {
@@ -78,6 +82,8 @@ void Orion_Visibility_ResetClient(int client)
 
     g_OrionVisibilityBlocked[client] = 0;
     g_OrionVisibilityLastSpawnReportTick[client] = 0;
+    g_OrionVisibilitySuppressedSinceTelemetry[client] = 0;
+    g_OrionVisibilityLastTelemetryAt[client] = 0.0;
     Orion_Visibility_ResetPairCache(client);
 }
 
@@ -595,13 +601,19 @@ void Orion_Visibility_RecordSuppressed(int reason)
 
 void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int reason, float score, bool blocked)
 {
+    score = 0.0;
     g_OrionVisibilityBlocked[observer]++;
+    g_OrionVisibilitySuppressedSinceTelemetry[observer]++;
     Orion_Visibility_RecordSuppressed(reason);
 
-    if (g_OrionVisibilityBlocked[observer] != 1 && (g_OrionVisibilityBlocked[observer] % 250) != 0)
+    float now = GetGameTime();
+    if (g_OrionVisibilityLastTelemetryAt[observer] > 0.0
+        && (now - g_OrionVisibilityLastTelemetryAt[observer]) < ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS)
     {
         return;
     }
+
+    g_OrionVisibilityLastTelemetryAt[observer] = now;
 
     char reasonName[32];
     char spawnState[32];
@@ -611,7 +623,7 @@ void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int rea
     Format(
         details,
         sizeof(details),
-        "reason=%s entity=%d team=%d spawn_state=%s blocked=%d suppressed=%d observer_blocks=%d hidden_ticks=%d",
+        "classification=mitigation_telemetry reason=%s entity=%d team=%d spawn_state=%s blocked=%d suppressed_total=%d observer_blocks_total=%d observer_blocks_window=%d hidden_ticks=%d throttle_seconds=%.1f",
         reasonName,
         entity,
         GetClientTeam(entity),
@@ -619,8 +631,11 @@ void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int rea
         blocked,
         g_OrionVisibilitySuppressedByReason[reason],
         g_OrionVisibilityBlocked[observer],
-        g_OrionVisibilityPvsHiddenTicks[entity][observer]);
-    Orion_Evidence_Submit(observer, "visibility_guard", score, "observe", details);
+        g_OrionVisibilitySuppressedSinceTelemetry[observer],
+        g_OrionVisibilityPvsHiddenTicks[entity][observer],
+        ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS);
+    g_OrionVisibilitySuppressedSinceTelemetry[observer] = 0;
+    Orion_Evidence_Submit(observer, "visibility_guard", score, "telemetry", details);
 }
 
 void Orion_Visibility_RecordSpawnEvidence(int infected, int survivor, float distance, bool hasLineOfSight, bool isNearSpawn, bool isVisibleSpawn)

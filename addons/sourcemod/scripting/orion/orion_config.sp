@@ -23,6 +23,28 @@ ConVar g_OrionVocalizeGuardEnable = null;
 ConVar g_OrionVocalizeBudget = null;
 ConVar g_OrionVocalizeCooldownSeconds = null;
 ConVar g_OrionVocalizeAlertsBeforeKick = null;
+ConVar g_OrionAbilityGuardEnable = null;
+ConVar g_OrionAbilityGuardSpitCooldownSeconds = null;
+ConVar g_OrionAbilityGuardVomitCooldownSeconds = null;
+ConVar g_OrionAbilityGuardTankPunchCooldownSeconds = null;
+ConVar g_OrionAbilityGuardStumbleCooldownSeconds = null;
+ConVar g_OrionAbilityGuardChargeCooldownSeconds = null;
+ConVar g_OrionAbilityGuardJockeyCooldownSeconds = null;
+ConVar g_OrionAbilityGuardAirStuckCooldownSeconds = null;
+ConVar g_OrionAbilityGuardDoubleVomitWindowTicks = null;
+ConVar g_OrionAbilityGuardJockeyStateWindowTicks = null;
+ConVar g_OrionAbilityGuardChargerSteerCapDegrees = null;
+ConVar g_OrionAbilityGuardAirStuckWindowTicks = null;
+ConVar g_OrionAlertAudienceDefault = null;
+StringMap g_OrionAlertAudienceCvars = null;
+
+// Detection types that get an individually-configurable alert audience cvar.
+static const char ORION_ALERT_AUDIENCE_TYPES[][] =
+{
+    "aim", "movement", "usercmd_guard", "lag_exploit", "visibility_guard",
+    "spawn_guard", "abuse_command", "abuse_name", "angle_guard", "integrity",
+    "vocalize_spam", "ability_guard"
+};
 ConVar g_OrionBacktrackPatchEnable = null;
 ConVar g_OrionBacktrackToleranceTicks = null;
 ConVar g_OrionHardMitigationEnable = null;
@@ -60,6 +82,31 @@ void Orion_Config_Init()
     g_OrionVocalizeBudget = CreateConVar("orion_vocalize_budget", "5", "Vocalizes a player may use in a burst before spam alerts begin.", _, true, 1.0, true, 50.0);
     g_OrionVocalizeCooldownSeconds = CreateConVar("orion_vocalize_cooldown_seconds", "3.0", "Quiet seconds after the budget that forgive the burst; vocalizing before it elapses counts as spam.", _, true, 0.5, true, 30.0);
     g_OrionVocalizeAlertsBeforeKick = CreateConVar("orion_vocalize_alerts_before_kick", "3", "Spam alerts a player accumulates before Orion kicks them; 0 disables the kick.", _, true, 0.0, true, 20.0);
+
+    g_OrionAbilityGuardEnable = CreateConVar("orion_ability_guard_enable", "1", "Detect special-infected ability glitches (infinite spit, double vomit, infinite tank punch, infinite stumble, charger rotation, jockey re-entry, air stuck).", _, true, 0.0, true, 1.0);
+    g_OrionAbilityGuardSpitCooldownSeconds = CreateConVar("orion_ability_guard_spit_cooldown_seconds", "14.0", "Minimum legal seconds between Spitter spits; faster is cooldown abuse. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardVomitCooldownSeconds = CreateConVar("orion_ability_guard_vomit_cooldown_seconds", "1.0", "Minimum legal seconds between Boomer vomits. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardTankPunchCooldownSeconds = CreateConVar("orion_ability_guard_tank_punch_cooldown_seconds", "1.5", "Minimum legal seconds between Tank punches. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardStumbleCooldownSeconds = CreateConVar("orion_ability_guard_stumble_cooldown_seconds", "1.0", "Minimum legal seconds between stumbles a special infected inflicts. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardChargeCooldownSeconds = CreateConVar("orion_ability_guard_charge_cooldown_seconds", "12.0", "Minimum legal seconds between Charger charges. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardJockeyCooldownSeconds = CreateConVar("orion_ability_guard_jockey_cooldown_seconds", "5.0", "Minimum legal seconds between Jockey leaps. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardAirStuckCooldownSeconds = CreateConVar("orion_ability_guard_air_stuck_cooldown_seconds", "2.0", "Cooldown between air-stuck reports for one client. CONFIRM ON LIVE.", _, true, 0.0, true, 60.0);
+    g_OrionAbilityGuardDoubleVomitWindowTicks = CreateConVar("orion_ability_guard_double_vomit_window_ticks", "10", "Ticks within which a second vomit counts as a double-vomit glitch. CONFIRM ON LIVE.", _, true, 1.0, true, 200.0);
+    g_OrionAbilityGuardJockeyStateWindowTicks = CreateConVar("orion_ability_guard_jockey_state_window_ticks", "32", "Ticks within which a re-ride counts as a jockey state glitch. CONFIRM ON LIVE.", _, true, 1.0, true, 200.0);
+    g_OrionAbilityGuardChargerSteerCapDegrees = CreateConVar("orion_ability_guard_charger_steer_cap_degrees", "30.0", "Maximum legal yaw a Charger may turn during a charge; more is charger-rotation. CONFIRM ON LIVE.", _, true, 0.0, true, 180.0);
+    g_OrionAbilityGuardAirStuckWindowTicks = CreateConVar("orion_ability_guard_air_stuck_window_ticks", "33", "Consecutive airborne near-zero-speed ticks before air-stuck is reported. CONFIRM ON LIVE.", _, true, 1.0, true, 400.0);
+
+    g_OrionAlertAudienceDefault = CreateConVar("orion_alert_audience_default", "admins", "Default alert audience for detections without a specific override. Values: everyone, admins, flag:<flags>, off.");
+    g_OrionAlertAudienceCvars = new StringMap();
+    for (int audienceIndex = 0; audienceIndex < sizeof(ORION_ALERT_AUDIENCE_TYPES); audienceIndex++)
+    {
+        char audienceCvarName[64];
+        Format(audienceCvarName, sizeof(audienceCvarName), "orion_alert_audience_%s", ORION_ALERT_AUDIENCE_TYPES[audienceIndex]);
+        char audienceCvarDesc[160];
+        Format(audienceCvarDesc, sizeof(audienceCvarDesc), "Who sees %s alerts. Values: everyone, admins, flag:<flags>, off.", ORION_ALERT_AUDIENCE_TYPES[audienceIndex]);
+        ConVar audienceCvar = CreateConVar(audienceCvarName, "admins", audienceCvarDesc);
+        g_OrionAlertAudienceCvars.SetValue(ORION_ALERT_AUDIENCE_TYPES[audienceIndex], audienceCvar);
+    }
     g_OrionBacktrackPatchEnable = CreateConVar("orion_backtrack_patch_enable", "1", "Score suspicious command tick drift/backtrack windows.", _, true, 0.0, true, 1.0);
     g_OrionBacktrackToleranceTicks = CreateConVar("orion_backtrack_tolerance_ticks", "2", "Allowed command tick drift before backtrack evidence is scored.", _, true, 0.0, true, 16.0);
     g_OrionHardMitigationEnable = CreateConVar("orion_hard_mitigation_enable", "1", "Allow Orion to patch unsafe usercmd values outside shadow mode.", _, true, 0.0, true, 1.0);
@@ -223,6 +270,86 @@ float Orion_Config_VocalizeCooldownSeconds()
 int Orion_Config_VocalizeAlertsBeforeKick()
 {
     return g_OrionVocalizeAlertsBeforeKick.IntValue;
+}
+
+bool Orion_Config_AbilityGuardEnabled()
+{
+    return g_OrionAbilityGuardEnable != null && g_OrionAbilityGuardEnable.BoolValue;
+}
+
+float Orion_Config_AbilityGuardSpitCooldownSeconds()
+{
+    return g_OrionAbilityGuardSpitCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardVomitCooldownSeconds()
+{
+    return g_OrionAbilityGuardVomitCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardTankPunchCooldownSeconds()
+{
+    return g_OrionAbilityGuardTankPunchCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardStumbleCooldownSeconds()
+{
+    return g_OrionAbilityGuardStumbleCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardChargeCooldownSeconds()
+{
+    return g_OrionAbilityGuardChargeCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardJockeyCooldownSeconds()
+{
+    return g_OrionAbilityGuardJockeyCooldownSeconds.FloatValue;
+}
+
+float Orion_Config_AbilityGuardAirStuckCooldownSeconds()
+{
+    return g_OrionAbilityGuardAirStuckCooldownSeconds.FloatValue;
+}
+
+int Orion_Config_AbilityGuardDoubleVomitWindowTicks()
+{
+    return g_OrionAbilityGuardDoubleVomitWindowTicks.IntValue;
+}
+
+int Orion_Config_AbilityGuardJockeyStateWindowTicks()
+{
+    return g_OrionAbilityGuardJockeyStateWindowTicks.IntValue;
+}
+
+float Orion_Config_AbilityGuardChargerSteerCapDegrees()
+{
+    return g_OrionAbilityGuardChargerSteerCapDegrees.FloatValue;
+}
+
+int Orion_Config_AbilityGuardAirStuckWindowTicks()
+{
+    return g_OrionAbilityGuardAirStuckWindowTicks.IntValue;
+}
+
+void Orion_Config_GetAlertAudience(const char[] evidenceType, char[] buffer, int bufferLength)
+{
+    ConVar audienceCvar;
+    if (g_OrionAlertAudienceCvars != null
+        && g_OrionAlertAudienceCvars.GetValue(evidenceType, audienceCvar)
+        && audienceCvar != null)
+    {
+        audienceCvar.GetString(buffer, bufferLength);
+        return;
+    }
+
+    if (g_OrionAlertAudienceDefault != null)
+    {
+        g_OrionAlertAudienceDefault.GetString(buffer, bufferLength);
+        return;
+    }
+
+    strcopy(buffer, bufferLength, "admins");
 }
 
 bool Orion_Config_BacktrackPatchEnabled()

@@ -35,12 +35,15 @@ enum OrionMode
 };
 
 #include "orion/orion_config.sp"
+#include "orion/orion_messages.sp"
+#include "orion/orion_alerts.sp"
 #include "orion/orion_evidence.sp"
 #include "orion/orion_visibility_guard.sp"
 #include "orion/orion_usercmd_guard.sp"
 #include "orion/orion_aim_analyzer.sp"
 #include "orion/orion_movement_analyzer.sp"
 #include "orion/orion_abuse_guard.sp"
+#include "orion/orion_ability_guard.sp"
 #include "orion/orion_cvar_policy.sp"
 #include "orion/orion_integrity.sp"
 #include "orion/orion_readiness.sp"
@@ -57,6 +60,8 @@ public Plugin myinfo =
 public void OnPluginStart()
 {
     Orion_Config_Init();
+    Orion_Messages_Init();
+    Orion_Alerts_Init();
     Orion_Readiness_Init();
     Orion_Evidence_Init();
     Orion_Visibility_Init();
@@ -64,6 +69,7 @@ public void OnPluginStart()
     Orion_Aim_Init();
     Orion_Movement_Init();
     Orion_AbuseGuard_Init();
+    Orion_AbilityGuard_Init();
     Orion_CvarPolicy_Init();
     Orion_Integrity_Init();
 
@@ -85,8 +91,10 @@ public void OnClientPutInServer(int client)
     Orion_Movement_ResetClient(client);
     Orion_UserCmdGuard_ResetClient(client);
     Orion_AbuseGuard_ResetClient(client);
+    Orion_AbilityGuard_ResetClient(client);
     Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
+    Orion_Evidence_ResetClient(client);
     Orion_Visibility_HookClient(client);
 }
 
@@ -96,8 +104,10 @@ public void OnClientDisconnect(int client)
     Orion_Movement_ResetClient(client);
     Orion_UserCmdGuard_ResetClient(client);
     Orion_AbuseGuard_ResetClient(client);
+    Orion_AbilityGuard_ResetClient(client);
     Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
+    Orion_Evidence_ResetClient(client);
     Orion_Visibility_ResetClient(client);
 }
 

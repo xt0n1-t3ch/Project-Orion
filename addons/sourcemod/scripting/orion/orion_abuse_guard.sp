@@ -173,8 +173,10 @@ Action Orion_AbuseGuard_HandleVocalize(int client)
     int alertsBeforeKick = Orion_Config_VocalizeAlertsBeforeKick();
     if (alertsBeforeKick > 0 && g_OrionVocalizeSpamAlerts[client] >= alertsBeforeKick)
     {
-        // Phase 2 (i18n) replaces this literal with a translated phrase.
-        KickClient(client, "Vocalize spam");
+        // Localized kick reason in the player's own game language.
+        char kickReason[128];
+        Orion_Messages_FormatKickReason(client, "vocalize_spam", kickReason, sizeof(kickReason));
+        KickClient(client, "%s", kickReason);
         g_OrionVocalizeBurstCount[client] = 0;
         g_OrionVocalizeSpamAlerts[client] = 0;
         g_OrionVocalizeLastTime[client] = 0.0;
