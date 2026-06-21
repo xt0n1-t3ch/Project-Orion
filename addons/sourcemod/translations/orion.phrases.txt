@@ -1,0 +1,222 @@
+"Phrases"
+{
+    "orion.prefix"
+    {
+        "en"        "[Project-Orion]"
+        "es"        "[Project-Orion]"
+    }
+
+    "orion.alert.detected"
+    {
+        "#format"   "{1:s},{2:s},{3:s}"
+        "en"        "{1} was detected using [{2}] ({3})"
+        "es"        "Se detectó a {1} usando [{2}] ({3})"
+    }
+
+    "orion.alert.telemetry"
+    {
+        "#format"   "{1:s},{2:s},{3:s}"
+        "en"        "{1} generated {2} ({3})"
+        "es"        "{1} generó {2} ({3})"
+    }
+
+    "orion.player.unknown"
+    {
+        "#format"   "{1:d}"
+        "en"        "client #{1}"
+        "es"        "cliente #{1}"
+    }
+
+    "orion.confidence.low"
+    {
+        "en"        "low confidence"
+        "es"        "confianza baja"
+    }
+
+    "orion.confidence.medium"
+    {
+        "en"        "medium confidence"
+        "es"        "confianza media"
+    }
+
+    "orion.confidence.high"
+    {
+        "en"        "high confidence"
+        "es"        "confianza alta"
+    }
+
+    "orion.evidence.aim"
+    {
+        "en"        "Aimbot / Silent Aim"
+        "es"        "Aimbot / Apuntado Silencioso"
+    }
+
+    "orion.evidence.movement"
+    {
+        "en"        "Movement Automation"
+        "es"        "Automatización de Movimiento"
+    }
+
+    "orion.evidence.usercmd_guard"
+    {
+        "en"        "Command Tampering"
+        "es"        "Manipulación de Comandos"
+    }
+
+    "orion.evidence.lag_exploit"
+    {
+        "en"        "Lag Exploit"
+        "es"        "Explotación de Lag"
+    }
+
+    "orion.evidence.visibility_guard"
+    {
+        "en"        "Visibility Mitigation Telemetry"
+        "es"        "Telemetría de Mitigación de Visibilidad"
+    }
+
+    "orion.evidence.spawn_guard"
+    {
+        "en"        "Spawn Abuse"
+        "es"        "Abuso de Aparición"
+    }
+
+    "orion.evidence.abuse_command"
+    {
+        "en"        "Command Abuse"
+        "es"        "Abuso de Comandos"
+    }
+
+    "orion.evidence.abuse_name"
+    {
+        "en"        "Name Abuse"
+        "es"        "Abuso de Nombre"
+    }
+
+    "orion.evidence.angle_guard"
+    {
+        "en"        "Invalid View Angles"
+        "es"        "Ángulos de Vista Inválidos"
+    }
+
+    "orion.evidence.integrity"
+    {
+        "en"        "Client Integrity Tampering"
+        "es"        "Manipulación de Integridad del Cliente"
+    }
+
+    "orion.evidence.vocalize_spam"
+    {
+        "en"        "Vocalize Spam"
+        "es"        "Spam de Vocalizaciones"
+    }
+
+    "orion.evidence.chat_guard"
+    {
+        "en"        "Chat Abuse"
+        "es"        "Abuso de Chat"
+    }
+
+    "orion.evidence.network"
+    {
+        "en"        "Network Anomaly"
+        "es"        "Anomalía de Red"
+    }
+
+    "orion.evidence.unknown"
+    {
+        "en"        "Unknown Evidence"
+        "es"        "Evidencia Desconocida"
+    }
+
+    "orion.action.observe"
+    {
+        "en"        "observe"
+        "es"        "observar"
+    }
+
+    "orion.action.ban"
+    {
+        "en"        "ban"
+        "es"        "banear"
+    }
+
+    "orion.action.kick"
+    {
+        "en"        "kick"
+        "es"        "expulsar"
+    }
+
+    "orion.action.block"
+    {
+        "en"        "block"
+        "es"        "bloquear"
+    }
+
+    "orion.action.telemetry"
+    {
+        "en"        "telemetry"
+        "es"        "telemetría"
+    }
+
+    "orion.action.quarantine"
+    {
+        "en"        "quarantine"
+        "es"        "cuarentena"
+    }
+
+    "orion.enforcement.ban_reason"
+    {
+        "#format"   "{1:s},{2:s}"
+        "en"        "Project Orion: {1} evidence score {2}"
+        "es"        "Project Orion: evidencia de {1} con puntaje {2}"
+    }
+
+    "orion.enforcement.kick_reason"
+    {
+        "#format"   "{1:s}"
+        "en"        "Project Orion: {1}"
+        "es"        "Project Orion: {1}"
+    }
+
+    "orion.command.session.current"
+    {
+        "#format"   "{1:s}"
+        "en"        "[Project-Orion] session={1}"
+        "es"        "[Project-Orion] sesión={1}"
+    }
+
+    "orion.command.session.updated"
+    {
+        "#format"   "{1:s}"
+        "en"        "[Project-Orion] session set to {1}"
+        "es"        "[Project-Orion] sesión actualizada a {1}"
+    }
+
+    "orion.command.status"
+    {
+        "#format"   "{1:d},{2:s},{3:s}"
+        "en"        "[Project-Orion] enabled={1} mode={2} session={3}"
+        "es"        "[Project-Orion] activo={1} modo={2} sesión={3}"
+    }
+
+    "orion.command.log.header"
+    {
+        "#format"   "{1:d}"
+        "en"        "[Project-Orion] recent detections, newest first, limit={1}"
+        "es"        "[Project-Orion] detecciones recientes, nuevas primero, límite={1}"
+    }
+
+    "orion.command.log.empty"
+    {
+        "en"        "[Project-Orion] no recent detections"
+        "es"        "[Project-Orion] no hay detecciones recientes"
+    }
+
+    "orion.command.log.entry"
+    {
+        "#format"   "{1:d},{2:s},{3:s},{4:s},{5:s},{6:s},{7:d}"
+        "en"        "#{1} {2}: {3} score={4} action={5} repeats={7} details=\"{6}\""
+        "es"        "#{1} {2}: {3} puntaje={4} acción={5} repeticiones={7} detalles=\"{6}\""
+    }
+}

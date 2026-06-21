@@ -1,6 +1,11 @@
+// L4D2 laser sight lives in the upgrade bit-vector. Fake-upgrade nospread tries
+// to get the laser accuracy effect without this server-visible bit being set.
+#define ORION_INTEGRITY_LASER_SIGHT_BIT (1 << 2)
+
 float g_OrionIntegrityScore[MAXPLAYERS + 1];
 Handle g_OrionIntegrityTimer = null;
 Handle g_OrionNetworkTimer = null;
+int g_OrionIntegrityFakeUpgradeStreak[MAXPLAYERS + 1];
 
 void Orion_Integrity_Init()
 {
@@ -13,11 +18,14 @@ void Orion_Integrity_Init()
     {
         g_OrionNetworkTimer = CreateTimer(5.0, Orion_Integrity_NetworkTimer, _, TIMER_REPEAT);
     }
+
+    HookEvent("player_hurt", Orion_Integrity_OnPlayerHurt, EventHookMode_Post);
 }
 
 void Orion_Integrity_ResetClient(int client)
 {
     g_OrionIntegrityScore[client] = 0.0;
+    g_OrionIntegrityFakeUpgradeStreak[client] = 0;
 }
 
 public Action Orion_Integrity_Timer(Handle timer)
@@ -104,6 +112,48 @@ public void Orion_Integrity_OnClientConVar(QueryCookie cookie, int client, ConVa
     }
 }
 
+public void Orion_Integrity_OnPlayerHurt(Event event, const char[] name, bool dontBroadcast)
+{
+    int attacker = GetClientOfUserId(event.GetInt("attacker"));
+    int victim = GetClientOfUserId(event.GetInt("userid"));
+
+    if (!Orion_Config_AimIntegrityEnabled() || !Orion_Integrity_IsScorableHit(attacker, victim))
+    {
+        return;
+    }
+
+    int lastAimTick = Orion_Aim_GetLastObservedTick(attacker);
+    int tightHitStreak = Orion_Aim_GetLaserTightHitStreak(attacker);
+    if (tightHitStreak < Orion_Config_AimLaserTightMinHits() || !Orion_Aim_HasRecentLaserTightHits(attacker, lastAimTick))
+    {
+        if (g_OrionIntegrityFakeUpgradeStreak[attacker] > 0)
+        {
+            g_OrionIntegrityFakeUpgradeStreak[attacker]--;
+        }
+        return;
+    }
+
+    int upgradeBitVec = 0;
+    int upgradedPrimaryAmmoLoaded = 0;
+    bool hasUpgradeBits = Orion_Integrity_TryGetUpgradeInt(attacker, "m_upgradeBitVec", upgradeBitVec);
+    bool hasUpgradedAmmo = Orion_Integrity_TryGetUpgradeInt(attacker, "m_nUpgradedPrimaryAmmoLoaded", upgradedPrimaryAmmoLoaded);
+    if (!hasUpgradeBits)
+    {
+        return;
+    }
+
+    bool hasLaserUpgrade = (upgradeBitVec & ORION_INTEGRITY_LASER_SIGHT_BIT) != 0;
+    if (hasLaserUpgrade)
+    {
+        g_OrionIntegrityFakeUpgradeStreak[attacker] = 0;
+        return;
+    }
+
+    g_OrionIntegrityFakeUpgradeStreak[attacker]++;
+    g_OrionIntegrityScore[attacker] += g_OrionIntegrityFakeUpgradeStreak[attacker] >= 2 ? 24.0 : 12.0;
+    Orion_Integrity_ReportFakeUpgradeIfNeeded(attacker, upgradeBitVec, hasUpgradedAmmo ? upgradedPrimaryAmmoLoaded : -1, tightHitStreak);
+}
+
 public Action Orion_Integrity_OnClientSayCommand(int client, const char[] command, const char[] message)
 {
     if (!Orion_Config_ChatGuardEnabled())
@@ -149,6 +199,66 @@ void Orion_Integrity_OnClientSettingsChanged(int client)
     char details[256];
     Format(details, sizeof(details), "reason=invalid_name controls=%d", controlCharacters);
     Orion_Evidence_Submit(client, "name_guard", g_OrionIntegrityScore[client], "observe", details);
+}
+
+bool Orion_Integrity_IsScorableHit(int attacker, int victim)
+{
+    return Orion_IsAliveHumanPlayer(attacker)
+        && victim > 0
+        && victim <= MaxClients
+        && victim != attacker
+        && IsClientInGame(victim)
+        && IsPlayerAlive(victim)
+        && !IsFakeClient(victim)
+        && GetClientTeam(attacker) != GetClientTeam(victim);
+}
+
+// The upgrade fields can live on the active weapon or on the player depending
+// on the L4D2 item path. Every read is guarded so missing netprops fail closed
+// instead of turning calibration servers into crash reproducers.
+bool Orion_Integrity_TryGetUpgradeInt(int client, const char[] propName, int &propValue)
+{
+    if (HasEntProp(client, Prop_Send, "m_hActiveWeapon"))
+    {
+        int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+        if (activeWeapon > MaxClients && IsValidEntity(activeWeapon) && HasEntProp(activeWeapon, Prop_Send, propName))
+        {
+            propValue = GetEntProp(activeWeapon, Prop_Send, propName);
+            return true;
+        }
+    }
+
+    if (HasEntProp(client, Prop_Send, propName))
+    {
+        propValue = GetEntProp(client, Prop_Send, propName);
+        return true;
+    }
+
+    return false;
+}
+
+void Orion_Integrity_ReportFakeUpgradeIfNeeded(int client, int upgradeBitVec, int upgradedPrimaryAmmoLoaded, int tightHitStreak)
+{
+    float alertThreshold = Orion_Config_IntegrityThreshold();
+    if (g_OrionIntegrityScore[client] < alertThreshold)
+    {
+        return;
+    }
+
+    char details[256];
+    Format(
+        details,
+        sizeof(details),
+        "reason=fake_upgrade_nospread upgrade_bits=%d upgraded_ammo=%d laser_bit=%d tight_hits=%d fake_upgrade_streak=%d",
+        upgradeBitVec,
+        upgradedPrimaryAmmoLoaded,
+        ORION_INTEGRITY_LASER_SIGHT_BIT,
+        tightHitStreak,
+        g_OrionIntegrityFakeUpgradeStreak[client]);
+
+    char action[16];
+    strcopy(action, sizeof(action), g_OrionIntegrityScore[client] >= Orion_Config_EnforceThreshold(alertThreshold) && g_OrionIntegrityFakeUpgradeStreak[client] >= 2 ? "ban" : "observe");
+    Orion_Evidence_Submit(client, "integrity", g_OrionIntegrityScore[client], action, details);
 }
 
 int Orion_Integrity_CountControlCharacters(const char[] text)

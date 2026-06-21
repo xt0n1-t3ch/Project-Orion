@@ -35,12 +35,15 @@ enum OrionMode
 };
 
 #include "orion/orion_config.sp"
+#include "orion/orion_messages.sp"
+#include "orion/orion_alerts.sp"
 #include "orion/orion_evidence.sp"
 #include "orion/orion_visibility_guard.sp"
 #include "orion/orion_usercmd_guard.sp"
 #include "orion/orion_aim_analyzer.sp"
 #include "orion/orion_movement_analyzer.sp"
 #include "orion/orion_abuse_guard.sp"
+#include "orion/orion_ability_guard.sp"
 #include "orion/orion_cvar_policy.sp"
 #include "orion/orion_integrity.sp"
 #include "orion/orion_readiness.sp"
@@ -57,6 +60,8 @@ public Plugin myinfo =
 public void OnPluginStart()
 {
     Orion_Config_Init();
+    Orion_Messages_Init();
+    Orion_Alerts_Init();
     Orion_Readiness_Init();
     Orion_Evidence_Init();
     Orion_Visibility_Init();
@@ -64,6 +69,7 @@ public void OnPluginStart()
     Orion_Aim_Init();
     Orion_Movement_Init();
     Orion_AbuseGuard_Init();
+    Orion_AbilityGuard_Init();
     Orion_CvarPolicy_Init();
     Orion_Integrity_Init();
 
@@ -85,8 +91,10 @@ public void OnClientPutInServer(int client)
     Orion_Movement_ResetClient(client);
     Orion_UserCmdGuard_ResetClient(client);
     Orion_AbuseGuard_ResetClient(client);
+    Orion_AbilityGuard_ResetClient(client);
     Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
+    Orion_Evidence_ResetClient(client);
     Orion_Visibility_HookClient(client);
 }
 
@@ -96,8 +104,10 @@ public void OnClientDisconnect(int client)
     Orion_Movement_ResetClient(client);
     Orion_UserCmdGuard_ResetClient(client);
     Orion_AbuseGuard_ResetClient(client);
+    Orion_AbilityGuard_ResetClient(client);
     Orion_CvarPolicy_ResetClient(client);
     Orion_Integrity_ResetClient(client);
+    Orion_Evidence_ResetClient(client);
     Orion_Visibility_ResetClient(client);
 }
 
@@ -190,4 +200,22 @@ float Orion_NormalizeAngleDelta(float angleDelta)
 int Orion_AbsInt(int value)
 {
     return value < 0 ? -value : value;
+}
+
+/**
+ * True when a usercmd carries real client input that is safe to score.
+ *
+ * The engine feeds OnPlayerRunCmd synthetic/empty commands during idle,
+ * loading, paused, and just-spawned states; those arrive with a command
+ * number or tickcount of zero, frozen angles, and no buttons. Scoring them
+ * is the single biggest source of false positives: a tickcount of 0 makes
+ * tick-drift read as the entire server uptime (e.g. -8158), banning every
+ * tick. The Reborn client base guards the exact same way (it skips a frame
+ * unless command_number != 0), so this is the canonical "is this a real,
+ * player-authored command" gate. ONE owner, consumed by every per-tick
+ * analyzer, so the contract can never diverge between modules again.
+ */
+bool Orion_IsActiveCommandSample(int commandNumber, int tickcount)
+{
+    return commandNumber > 0 && tickcount > 0;
 }

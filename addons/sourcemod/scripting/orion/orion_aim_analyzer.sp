@@ -7,6 +7,9 @@
 #define ORION_AIM_JOIN_GRACE_SECONDS 12.0
 #define ORION_AIM_RECENT_CONTEXT_TICKS 10
 #define ORION_AIM_MAX_SCORE 100.0
+#define ORION_AIM_PLAYER_CENTER_Z 36.0
+#define ORION_AIM_RAPIDFIRE_NEXT_ATTACK_GRACE 0.01
+#define ORION_AIM_TIGHT_HIT_RECENT_TICKS 24
 
 float g_OrionAimLastAngles[MAXPLAYERS + 1][3];
 float g_OrionAimLastDelta[MAXPLAYERS + 1];
@@ -37,6 +40,19 @@ int g_OrionAimBurstFireTicks[MAXPLAYERS + 1];
 int g_OrionAimLastOutcomeTick[MAXPLAYERS + 1];
 int g_OrionAimLastOutcomeDamage[MAXPLAYERS + 1];
 int g_OrionAimLastOutcomeHitGroup[MAXPLAYERS + 1];
+int g_OrionAimAttackToggleStreak[MAXPLAYERS + 1];
+int g_OrionAimRapidfireCadenceStreak[MAXPLAYERS + 1];
+int g_OrionAimRapidfireNextAttackStreak[MAXPLAYERS + 1];
+int g_OrionAimRapidfireHitStreak[MAXPLAYERS + 1];
+int g_OrionAimSilentMismatchHits[MAXPLAYERS + 1];
+int g_OrionAimNorecoilHitStreak[MAXPLAYERS + 1];
+int g_OrionAimLaserTightHitStreak[MAXPLAYERS + 1];
+int g_OrionAimLastTightHitTick[MAXPLAYERS + 1];
+float g_OrionAimLastSilentMismatchDegrees[MAXPLAYERS + 1];
+float g_OrionAimBurstStartPitch[MAXPLAYERS + 1];
+float g_OrionAimBurstMinPitch[MAXPLAYERS + 1];
+float g_OrionAimBurstMaxPitch[MAXPLAYERS + 1];
+float g_OrionAimBurstPitchMotion[MAXPLAYERS + 1];
 float g_OrionAimScore[MAXPLAYERS + 1];
 float g_OrionAimReadyAt[MAXPLAYERS + 1];
 bool g_OrionAimHasAngles[MAXPLAYERS + 1];
@@ -70,8 +86,21 @@ void Orion_Aim_ResetClient(int client)
     g_OrionAimLastOutcomeTick[client] = 0;
     g_OrionAimLastOutcomeDamage[client] = 0;
     g_OrionAimLastOutcomeHitGroup[client] = 0;
+    g_OrionAimAttackToggleStreak[client] = 0;
+    g_OrionAimRapidfireCadenceStreak[client] = 0;
+    g_OrionAimRapidfireNextAttackStreak[client] = 0;
+    g_OrionAimRapidfireHitStreak[client] = 0;
+    g_OrionAimSilentMismatchHits[client] = 0;
+    g_OrionAimNorecoilHitStreak[client] = 0;
+    g_OrionAimLaserTightHitStreak[client] = 0;
+    g_OrionAimLastTightHitTick[client] = 0;
     g_OrionAimLastOutcomeHeadshot[client] = false;
     g_OrionAimLastOutcomeNoSpreadSignal[client] = false;
+    g_OrionAimLastSilentMismatchDegrees[client] = 0.0;
+    g_OrionAimBurstStartPitch[client] = 0.0;
+    g_OrionAimBurstMinPitch[client] = 0.0;
+    g_OrionAimBurstMaxPitch[client] = 0.0;
+    g_OrionAimBurstPitchMotion[client] = 0.0;
     g_OrionAimScore[client] = 0.0;
     g_OrionAimReadyAt[client] = GetGameTime() + ORION_AIM_JOIN_GRACE_SECONDS;
     g_OrionAimLastDelta[client] = 0.0;
@@ -134,6 +163,8 @@ void Orion_Aim_OnPlayerRunCmd(int client, int buttons, float angles[3], int tick
     bool attackStarted = attackPressed && ((g_OrionAimLastButtons[client] & IN_ATTACK) == 0);
     bool attackStopped = !attackPressed && ((g_OrionAimLastButtons[client] & IN_ATTACK) != 0);
     int mouseMagnitude = Orion_AbsInt(mouse[0]) + Orion_AbsInt(mouse[1]);
+    Orion_Aim_RecordAttackCadence(client, attackPressed, attackStarted, attackStopped);
+    Orion_Aim_RecordBurstPitch(client, attackPressed, pitchDelta, angles[0]);
 
     if (Orion_Aim_IsInJoinGrace(client))
     {
@@ -159,6 +190,54 @@ void Orion_Aim_OnPlayerRunCmd(int client, int buttons, float angles[3], int tick
     Orion_Aim_StoreCommandSnapshot(client, angles, target, totalDelta, pitchDelta, yawDelta, buttons, tickcount, mouseMagnitude);
 
     Orion_Aim_Decay(client);
+}
+
+// Tracks the one-tick attack toggles rapidfire/autoshoot uses to manufacture
+// fire events. It is only scored later when weapon_fire/player_hurt confirms
+// the toggle cadence produced real offensive output.
+void Orion_Aim_RecordAttackCadence(int client, bool attackPressed, bool attackStarted, bool attackStopped)
+{
+    if (attackStarted || attackStopped)
+    {
+        g_OrionAimAttackToggleStreak[client]++;
+        return;
+    }
+
+    if (!attackPressed && g_OrionAimAttackToggleStreak[client] > 0)
+    {
+        g_OrionAimAttackToggleStreak[client]--;
+    }
+}
+
+// A no-recoil compensator keeps the served pitch almost flat across a sustained
+// burst. This records the pitch span and total pitch motion; scoring waits for
+// hits so normal aim practice is not punished by view-angle shape alone.
+void Orion_Aim_RecordBurstPitch(int client, bool attackPressed, float pitchDelta, float currentPitch)
+{
+    if (!attackPressed)
+    {
+        return;
+    }
+
+    if (g_OrionAimBurstFireTicks[client] <= 1)
+    {
+        g_OrionAimBurstStartPitch[client] = currentPitch;
+        g_OrionAimBurstMinPitch[client] = currentPitch;
+        g_OrionAimBurstMaxPitch[client] = currentPitch;
+        g_OrionAimBurstPitchMotion[client] = 0.0;
+        return;
+    }
+
+    if (currentPitch < g_OrionAimBurstMinPitch[client])
+    {
+        g_OrionAimBurstMinPitch[client] = currentPitch;
+    }
+    else if (currentPitch > g_OrionAimBurstMaxPitch[client])
+    {
+        g_OrionAimBurstMaxPitch[client] = currentPitch;
+    }
+
+    g_OrionAimBurstPitchMotion[client] += pitchDelta;
 }
 
 void Orion_Aim_StoreCommandSnapshot(int client, float angles[3], int target, float totalDelta, float pitchDelta, float yawDelta, int buttons, int tickcount, int mouseMagnitude)
@@ -271,14 +350,18 @@ void Orion_Aim_ScoreAngleHistory(int client, int target, float pitchDelta, float
 
     float scoreDelta = 0.0;
 
-    if (snap2Delta >= ORION_AIM_SNAP2_HIGH_DELTA)
+    // A sharp 2-tick snap is only suspicious when it lands ON a valid target the
+    // player just acquired (target_ticks<=1). Raw turn magnitude with no target
+    // under the crosshair is a normal human flick and must NOT score — that, plus
+    // treating mouse==0 as proof, was the 180-degree false positive that banned
+    // legit players. mouse==0 is unreliable in L4D2 (controllers/configs report
+    // it legitimately), so here it only nudges the weight; it never carries a ban
+    // on its own. The bare accumulated-window-delta path is removed entirely; the
+    // real silent-aim signal is the served-angle-vs-hit mismatch (aim integrity
+    // phase) and the fire-tick attack window, not how far the view swept.
+    if (hasValidTarget && g_OrionAimTargetTicks[client] <= 1 && snap2Delta >= ORION_AIM_SNAP2_HIGH_DELTA)
     {
-        scoreDelta += mouseMagnitude <= 2 ? 18.0 : 10.0;
-    }
-
-    if (windowDelta >= ORION_AIM_WINDOW_HIGH_DELTA)
-    {
-        scoreDelta += mouseMagnitude <= 3 ? 15.0 : 8.0;
+        scoreDelta += mouseMagnitude <= 2 ? 12.0 : 8.0;
     }
 
     if (g_OrionAimAngleRepeatStreak[client] >= 5)
@@ -438,6 +521,7 @@ public void Orion_Aim_OnWeaponFire(Event event, const char[] name, bool dontBroa
     char weaponName[32];
     event.GetString("weapon", weaponName, sizeof(weaponName), "unknown");
     int weaponId = event.GetInt("weaponid", 0);
+    Orion_Aim_ScoreRapidfireFireSupport(client, weaponName, g_OrionAimLastTick[client]);
     Orion_Aim_RecordWeaponFire(client, weaponName, weaponId, g_OrionAimLastTick[client]);
 
     if (g_OrionAimLastDelta[client] >= 30.0)
@@ -455,18 +539,55 @@ public void Orion_Aim_OnWeaponFire(Event event, const char[] name, bool dontBroa
 
 void Orion_Aim_RecordWeaponFire(int client, const char[] weaponName, int weaponId, int tickcount)
 {
-    if (g_OrionAimLastFireTick[client] > 0 && tickcount - g_OrionAimLastFireTick[client] <= 2)
+    int fireIntervalTicks = g_OrionAimLastFireTick[client] > 0 ? tickcount - g_OrionAimLastFireTick[client] : -1;
+    if (fireIntervalTicks > 0 && fireIntervalTicks <= 2)
     {
         g_OrionAimBurstFireTicks[client]++;
     }
     else
     {
         g_OrionAimBurstFireTicks[client] = 1;
+        g_OrionAimNorecoilHitStreak[client] = 0;
+        g_OrionAimBurstStartPitch[client] = g_OrionAimLastAngles[client][0];
+        g_OrionAimBurstMinPitch[client] = g_OrionAimLastAngles[client][0];
+        g_OrionAimBurstMaxPitch[client] = g_OrionAimLastAngles[client][0];
+        g_OrionAimBurstPitchMotion[client] = 0.0;
     }
 
     g_OrionAimLastFireTick[client] = tickcount;
     g_OrionAimLastFireWeaponId[client] = weaponId;
     strcopy(g_OrionAimLastFireWeapon[client], sizeof(g_OrionAimLastFireWeapon[]), weaponName);
+}
+
+// Scores only support signals for rapidfire here. The finding is emitted from a
+// later hit/death correlation path so a dry weapon_fire spam cannot ban alone.
+void Orion_Aim_ScoreRapidfireFireSupport(int client, const char[] weaponName, int tickcount)
+{
+    if (!Orion_Config_AimIntegrityEnabled())
+    {
+        return;
+    }
+
+    int legalIntervalTicks = Orion_Aim_GetLegalFireIntervalTicks(weaponName);
+    int previousFireIntervalTicks = g_OrionAimLastFireTick[client] > 0 ? tickcount - g_OrionAimLastFireTick[client] : -1;
+    if (previousFireIntervalTicks > 0 && previousFireIntervalTicks < legalIntervalTicks)
+    {
+        g_OrionAimRapidfireCadenceStreak[client]++;
+    }
+    else if (g_OrionAimRapidfireCadenceStreak[client] > 0)
+    {
+        g_OrionAimRapidfireCadenceStreak[client]--;
+    }
+
+    float nextPrimaryAttackAt = 0.0;
+    if (Orion_Aim_TryGetNextPrimaryAttack(client, nextPrimaryAttackAt) && nextPrimaryAttackAt <= GetGameTime() + ORION_AIM_RAPIDFIRE_NEXT_ATTACK_GRACE)
+    {
+        g_OrionAimRapidfireNextAttackStreak[client]++;
+    }
+    else if (g_OrionAimRapidfireNextAttackStreak[client] > 0)
+    {
+        g_OrionAimRapidfireNextAttackStreak[client]--;
+    }
 }
 
 public void Orion_Aim_OnPlayerHurt(Event event, const char[] name, bool dontBroadcast)
@@ -503,6 +624,11 @@ public void Orion_Aim_OnPlayerHurt(Event event, const char[] name, bool dontBroa
         Orion_Aim_AddScore(attacker, 8.0);
     }
 
+    Orion_Aim_ScoreSilentAngleMismatch(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_ScoreRapidfireHit(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_ScoreNorecoilHit(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_RecordLaserTightHit(attacker, victim, hitGroup, false, g_OrionAimLastTick[attacker]);
+
     Orion_Aim_ScoreWeaponOutcome(attacker, hitGroup, false);
     Orion_Aim_ReportIfNeeded(attacker, "hurt_correlation", victim, g_OrionAimLastDelta[attacker], 0, g_OrionAimLastTick[attacker]);
 }
@@ -533,6 +659,11 @@ public void Orion_Aim_OnPlayerDeath(Event event, const char[] name, bool dontBro
         Orion_Aim_AddScore(attacker, 15.0);
         Orion_Aim_ReportIfNeeded(attacker, "autoshoot_death_correlation", victim, g_OrionAimLastDelta[attacker], 0, g_OrionAimLastTick[attacker]);
     }
+
+    Orion_Aim_ScoreSilentAngleMismatch(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_ScoreRapidfireHit(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_ScoreNorecoilHit(attacker, victim, g_OrionAimLastTick[attacker]);
+    Orion_Aim_RecordLaserTightHit(attacker, victim, 0, isHeadshot, g_OrionAimLastTick[attacker]);
 
     Orion_Aim_ScoreWeaponOutcome(attacker, 0, isHeadshot);
 }
@@ -581,6 +712,159 @@ void Orion_Aim_ScoreWeaponOutcome(int client, int hitGroup, bool isHeadshot)
     }
 }
 
+// Silent/perfect-silent serves a fake angle to the server while firing on the
+// real client angle. A hit with the served crosshair far off the victim is the
+// server-observable signal, but it must repeat before enforcement is eligible.
+void Orion_Aim_ScoreSilentAngleMismatch(int attacker, int victim, int tickcount)
+{
+    if (!Orion_Config_AimIntegrityEnabled() || !Orion_Aim_IsScorableVictim(attacker, victim))
+    {
+        return;
+    }
+
+    float mismatchDegrees = 0.0;
+    if (!Orion_Aim_TryGetServedAngleToVictimDegrees(attacker, victim, mismatchDegrees))
+    {
+        return;
+    }
+
+    g_OrionAimLastSilentMismatchDegrees[attacker] = mismatchDegrees;
+
+    int fireAge = g_OrionAimLastFireTick[attacker] > 0 ? tickcount - g_OrionAimLastFireTick[attacker] : -1;
+    if (fireAge < 0 || fireAge > 2 || mismatchDegrees < Orion_Config_AimSilentMismatchDegrees())
+    {
+        if (g_OrionAimSilentMismatchHits[attacker] > 0)
+        {
+            g_OrionAimSilentMismatchHits[attacker]--;
+        }
+        return;
+    }
+
+    g_OrionAimSilentMismatchHits[attacker]++;
+    if (g_OrionAimSilentMismatchHits[attacker] < Orion_Config_AimSilentMismatchMinHits())
+    {
+        Orion_Aim_AddScore(attacker, 12.0);
+        return;
+    }
+
+    Orion_Aim_AddScore(attacker, 22.0);
+    Orion_Aim_ReportIfNeeded(attacker, "silent_angle_mismatch", victim, mismatchDegrees, g_OrionAimLastMouseMagnitude[attacker], tickcount);
+}
+
+// Rapidfire/autoshoot needs both abnormal fire cadence and a hit. This combines
+// sub-cycle weapon_fire intervals, one-tick IN_ATTACK toggles, and suspicious
+// next-primary-attack state before emitting a hit-correlated finding.
+void Orion_Aim_ScoreRapidfireHit(int attacker, int victim, int tickcount)
+{
+    if (!Orion_Config_AimIntegrityEnabled() || !Orion_Aim_IsScorableVictim(attacker, victim))
+    {
+        return;
+    }
+
+    int minSignalCount = Orion_Config_AimRapidfireMinSignals();
+    bool hasCadenceSignal = g_OrionAimRapidfireCadenceStreak[attacker] >= minSignalCount;
+    bool hasNextAttackSignal = g_OrionAimRapidfireNextAttackStreak[attacker] >= minSignalCount;
+    bool hasToggleSignal = g_OrionAimAttackToggleStreak[attacker] >= minSignalCount + 1;
+    if (!hasCadenceSignal && !hasNextAttackSignal && !hasToggleSignal)
+    {
+        if (g_OrionAimRapidfireHitStreak[attacker] > 0)
+        {
+            g_OrionAimRapidfireHitStreak[attacker]--;
+        }
+        return;
+    }
+
+    g_OrionAimRapidfireHitStreak[attacker]++;
+    if (g_OrionAimRapidfireHitStreak[attacker] < 2)
+    {
+        Orion_Aim_AddScore(attacker, 10.0);
+        return;
+    }
+
+    Orion_Aim_AddScore(attacker, 20.0);
+    Orion_Aim_ReportIfNeeded(attacker, "rapidfire_cadence", victim, float(g_OrionAimRapidfireCadenceStreak[attacker]), g_OrionAimLastMouseMagnitude[attacker], tickcount);
+}
+
+// No-recoil keeps view pitch almost unchanged during a long burst. Requiring a
+// sustained burst plus repeated hits keeps ordinary short sprays and recoil
+// control practice out of enforcement scope.
+void Orion_Aim_ScoreNorecoilHit(int attacker, int victim, int tickcount)
+{
+    if (!Orion_Config_AimIntegrityEnabled() || !Orion_Aim_IsScorableVictim(attacker, victim))
+    {
+        return;
+    }
+
+    int minBurstShots = Orion_Config_AimNorecoilMinBurstShots();
+    float pitchSpan = g_OrionAimBurstMaxPitch[attacker] - g_OrionAimBurstMinPitch[attacker];
+    float flatPitchDegrees = Orion_Config_AimNorecoilFlatPitchDegrees();
+    if (g_OrionAimBurstFireTicks[attacker] < minBurstShots || pitchSpan > flatPitchDegrees || g_OrionAimBurstPitchMotion[attacker] > flatPitchDegrees * 2.0)
+    {
+        if (g_OrionAimNorecoilHitStreak[attacker] > 0)
+        {
+            g_OrionAimNorecoilHitStreak[attacker]--;
+        }
+        return;
+    }
+
+    g_OrionAimNorecoilHitStreak[attacker]++;
+    if (g_OrionAimNorecoilHitStreak[attacker] < Orion_Config_AimNorecoilMinHits())
+    {
+        Orion_Aim_AddScore(attacker, 10.0);
+        return;
+    }
+
+    Orion_Aim_AddScore(attacker, 20.0);
+    Orion_Aim_ReportIfNeeded(attacker, "norecoil_flat", victim, pitchSpan, g_OrionAimLastMouseMagnitude[attacker], tickcount);
+}
+
+// Laser-tight aim is a support signal for fake-upgrade nospread. The integrity
+// module cross-checks it against the weapon upgrade netprops; this function only
+// records repeated tight, hit-correlated accuracy.
+void Orion_Aim_RecordLaserTightHit(int attacker, int victim, int hitGroup, bool isHeadshot, int tickcount)
+{
+    if (!Orion_Config_AimIntegrityEnabled() || !Orion_Aim_IsScorableVictim(attacker, victim))
+    {
+        return;
+    }
+
+    float mismatchDegrees = 0.0;
+    if (!Orion_Aim_TryGetServedAngleToVictimDegrees(attacker, victim, mismatchDegrees))
+    {
+        return;
+    }
+
+    bool hitVitalGroup = isHeadshot || hitGroup == 1 || hitGroup == 2;
+    int fireAge = g_OrionAimLastFireTick[attacker] > 0 ? tickcount - g_OrionAimLastFireTick[attacker] : -1;
+    if (hitVitalGroup && fireAge >= 0 && fireAge <= 2 && mismatchDegrees <= Orion_Config_AimLaserTightDegrees() && g_OrionAimLastDelta[attacker] <= Orion_Config_AimLaserTightDegrees())
+    {
+        g_OrionAimLaserTightHitStreak[attacker]++;
+        g_OrionAimLastTightHitTick[attacker] = tickcount;
+        return;
+    }
+
+    if (g_OrionAimLaserTightHitStreak[attacker] > 0)
+    {
+        g_OrionAimLaserTightHitStreak[attacker]--;
+    }
+}
+
+int Orion_Aim_GetLaserTightHitStreak(int client)
+{
+    return g_OrionAimLaserTightHitStreak[client];
+}
+
+bool Orion_Aim_HasRecentLaserTightHits(int client, int tickcount)
+{
+    int ageTicks = g_OrionAimLastTightHitTick[client] > 0 ? tickcount - g_OrionAimLastTightHitTick[client] : -1;
+    return ageTicks >= 0 && ageTicks <= ORION_AIM_TIGHT_HIT_RECENT_TICKS;
+}
+
+int Orion_Aim_GetLastObservedTick(int client)
+{
+    return g_OrionAimLastTick[client];
+}
+
 bool Orion_Aim_PlayerIsAirborneOrFast(int client)
 {
     bool isAirborne = (GetEntityFlags(client) & FL_ONGROUND) == 0;
@@ -593,6 +877,109 @@ bool Orion_Aim_PlayerIsAirborneOrFast(int client)
 bool Orion_Aim_IsValidTarget(int target)
 {
     return target > 0 && target <= MaxClients && IsClientInGame(target);
+}
+
+bool Orion_Aim_IsScorableVictim(int attacker, int victim)
+{
+    return victim > 0
+        && victim <= MaxClients
+        && victim != attacker
+        && IsClientInGame(victim)
+        && IsPlayerAlive(victim)
+        && !IsFakeClient(victim)
+        && GetClientTeam(attacker) != GetClientTeam(victim);
+}
+
+bool Orion_Aim_TryGetServedAngleToVictimDegrees(int attacker, int victim, float &mismatchDegrees)
+{
+    float attackerEye[3];
+    float victimCenter[3];
+    GetClientEyePosition(attacker, attackerEye);
+    GetClientAbsOrigin(victim, victimCenter);
+    victimCenter[2] += ORION_AIM_PLAYER_CENTER_Z;
+
+    float toVictim[3];
+    MakeVectorFromPoints(attackerEye, victimCenter, toVictim);
+    if (GetVectorLength(toVictim) <= 0.01)
+    {
+        return false;
+    }
+
+    NormalizeVector(toVictim, toVictim);
+
+    float servedForward[3];
+    float servedRight[3];
+    float servedUp[3];
+    GetAngleVectors(g_OrionAimLastAngles[attacker], servedForward, servedRight, servedUp);
+    NormalizeVector(servedForward, servedForward);
+
+    float dotProduct = GetVectorDotProduct(servedForward, toVictim);
+    if (dotProduct > 1.0)
+    {
+        dotProduct = 1.0;
+    }
+    else if (dotProduct < -1.0)
+    {
+        dotProduct = -1.0;
+    }
+
+    mismatchDegrees = RadToDeg(ArcCosine(dotProduct));
+    return true;
+}
+
+int Orion_Aim_GetLegalFireIntervalTicks(const char[] weaponName)
+{
+    int configuredMinimumTicks = Orion_Config_AimRapidfireMinCycleTicks();
+    if (configuredMinimumTicks < 1)
+    {
+        configuredMinimumTicks = 1;
+    }
+
+    int legalMinimumTicks = configuredMinimumTicks;
+    if (StrContains(weaponName, "shotgun", false) != -1)
+    {
+        legalMinimumTicks = Orion_Aim_MaxInt(legalMinimumTicks, 10);
+    }
+    else if (StrContains(weaponName, "sniper", false) != -1 || StrContains(weaponName, "hunting_rifle", false) != -1)
+    {
+        legalMinimumTicks = Orion_Aim_MaxInt(legalMinimumTicks, 6);
+    }
+    else if (StrContains(weaponName, "pistol", false) != -1)
+    {
+        legalMinimumTicks = Orion_Aim_MaxInt(legalMinimumTicks, 3);
+    }
+    else if (StrContains(weaponName, "grenade_launcher", false) != -1)
+    {
+        legalMinimumTicks = Orion_Aim_MaxInt(legalMinimumTicks, 24);
+    }
+    else
+    {
+        legalMinimumTicks = Orion_Aim_MaxInt(legalMinimumTicks, 2);
+    }
+
+    return legalMinimumTicks;
+}
+
+bool Orion_Aim_TryGetNextPrimaryAttack(int client, float &nextPrimaryAttackAt)
+{
+    if (!HasEntProp(client, Prop_Send, "m_hActiveWeapon"))
+    {
+        return false;
+    }
+
+    int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+    if (activeWeapon <= MaxClients || !IsValidEntity(activeWeapon) || !HasEntProp(activeWeapon, Prop_Send, "m_flNextPrimaryAttack"))
+    {
+        return false;
+    }
+
+    nextPrimaryAttackAt = GetEntPropFloat(activeWeapon, Prop_Send, "m_flNextPrimaryAttack");
+    return true;
+}
+
+int Orion_Aim_MaxInt(int left, int right)
+{
+    return left > right ? left : right;
 }
 
 bool Orion_Aim_IsInJoinGrace(int client)
@@ -631,7 +1018,10 @@ bool Orion_Aim_IsBanEligible(int client, const char[] reason, int target, int ti
     if (StrEqual(reason, "attack_window", false)
         || StrEqual(reason, "hurt_correlation", false)
         || StrEqual(reason, "death_correlation", false)
-        || StrEqual(reason, "autoshoot_death_correlation", false))
+        || StrEqual(reason, "autoshoot_death_correlation", false)
+        || StrEqual(reason, "silent_angle_mismatch", false)
+        || StrEqual(reason, "norecoil_flat", false)
+        || StrEqual(reason, "rapidfire_cadence", false))
     {
         return hasValidTarget;
     }
@@ -671,7 +1061,7 @@ void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float
     int fireAge = g_OrionAimLastFireTick[client] > 0 ? tickcount - g_OrionAimLastFireTick[client] : -1;
     int outcomeAge = g_OrionAimLastOutcomeTick[client] > 0 ? tickcount - g_OrionAimLastOutcomeTick[client] : -1;
 
-    char details[512];
+    char details[768];
     bool isBanEligible = Orion_Aim_IsBanEligible(client, reason, target, tickcount);
     float graceRemainingSeconds = g_OrionAimReadyAt[client] - GetGameTime();
     if (graceRemainingSeconds < 0.0)
@@ -682,7 +1072,7 @@ void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float
     Format(
         details,
         sizeof(details),
-        "reason=%s target=%d angle_delta=%.1f snap2=%.1f total_delta=%.1f repeat=%d mouse=%d last_mouse=%d target_ticks=%d trigger=%d one_tick=%d hist=%d tick=%d weapon=%s weaponid=%d fire_age=%d burst=%d outcome_weapon=%s hitgroup=%d damage=%d headshot=%d nospread=%d outcome_age=%d ban_eligible=%d grace_left=%.1f",
+        "reason=%s target=%d angle_delta=%.1f snap2=%.1f total_delta=%.1f repeat=%d mouse=%d last_mouse=%d target_ticks=%d trigger=%d one_tick=%d hist=%d tick=%d weapon=%s weaponid=%d fire_age=%d burst=%d outcome_weapon=%s hitgroup=%d damage=%d headshot=%d nospread=%d outcome_age=%d silent_gap=%.1f silent_hits=%d rapidfire_cadence=%d rapidfire_next=%d rapidfire_hits=%d toggle=%d norecoil_hits=%d burst_pitch_span=%.2f burst_pitch_motion=%.2f tight_hits=%d ban_eligible=%d grace_left=%.1f",
         reason,
         target,
         angleDelta,
@@ -706,6 +1096,16 @@ void Orion_Aim_ReportIfNeeded(int client, const char[] reason, int target, float
         g_OrionAimLastOutcomeHeadshot[client],
         g_OrionAimLastOutcomeNoSpreadSignal[client],
         outcomeAge,
+        g_OrionAimLastSilentMismatchDegrees[client],
+        g_OrionAimSilentMismatchHits[client],
+        g_OrionAimRapidfireCadenceStreak[client],
+        g_OrionAimRapidfireNextAttackStreak[client],
+        g_OrionAimRapidfireHitStreak[client],
+        g_OrionAimAttackToggleStreak[client],
+        g_OrionAimNorecoilHitStreak[client],
+        g_OrionAimBurstMaxPitch[client] - g_OrionAimBurstMinPitch[client],
+        g_OrionAimBurstPitchMotion[client],
+        g_OrionAimLaserTightHitStreak[client],
         isBanEligible,
         graceRemainingSeconds);
 
@@ -722,6 +1122,43 @@ void Orion_Aim_Decay(int client)
         if (g_OrionAimScore[client] < 0.0)
         {
             g_OrionAimScore[client] = 0.0;
+        }
+    }
+
+    int tickcount = g_OrionAimLastTick[client];
+    if (g_OrionAimLastOutcomeTick[client] > 0 && tickcount - g_OrionAimLastOutcomeTick[client] > ORION_AIM_RECENT_CONTEXT_TICKS * 3)
+    {
+        if (g_OrionAimSilentMismatchHits[client] > 0)
+        {
+            g_OrionAimSilentMismatchHits[client]--;
+        }
+        if (g_OrionAimRapidfireHitStreak[client] > 0)
+        {
+            g_OrionAimRapidfireHitStreak[client]--;
+        }
+        if (g_OrionAimNorecoilHitStreak[client] > 0)
+        {
+            g_OrionAimNorecoilHitStreak[client]--;
+        }
+        if (g_OrionAimLaserTightHitStreak[client] > 0)
+        {
+            g_OrionAimLaserTightHitStreak[client]--;
+        }
+    }
+
+    if (g_OrionAimLastFireTick[client] > 0 && tickcount - g_OrionAimLastFireTick[client] > ORION_AIM_RECENT_CONTEXT_TICKS * 2)
+    {
+        if (g_OrionAimRapidfireCadenceStreak[client] > 0)
+        {
+            g_OrionAimRapidfireCadenceStreak[client]--;
+        }
+        if (g_OrionAimRapidfireNextAttackStreak[client] > 0)
+        {
+            g_OrionAimRapidfireNextAttackStreak[client]--;
+        }
+        if (g_OrionAimAttackToggleStreak[client] > 0)
+        {
+            g_OrionAimAttackToggleStreak[client]--;
         }
     }
 }

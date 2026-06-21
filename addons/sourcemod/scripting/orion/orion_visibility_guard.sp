@@ -23,13 +23,22 @@ int g_OrionVisibilityLastCheckedTick[MAXPLAYERS + 1][MAXPLAYERS + 1];
 bool g_OrionVisibilityIsVisible[MAXPLAYERS + 1][MAXPLAYERS + 1];
 float g_OrionVisibilityLastVisibleAt[MAXPLAYERS + 1][MAXPLAYERS + 1];
 int g_OrionVisibilityLastSpawnReportTick[MAXPLAYERS + 1];
+int g_OrionVisibilitySuppressedSinceTelemetry[MAXPLAYERS + 1];
+float g_OrionVisibilityLastTelemetryAt[MAXPLAYERS + 1];
+int g_OrionVisibilityPrefireCount[MAXPLAYERS + 1];
+float g_OrionVisibilityPrefireWindowStartedAt[MAXPLAYERS + 1];
+float g_OrionVisibilityLastPrefireEvidenceAt[MAXPLAYERS + 1];
 int g_OrionVisibilityTraceTick = -1;
 int g_OrionVisibilityTraceCount = 0;
+
+#define ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS 30.0
 
 void Orion_Visibility_Init()
 {
     RegAdminCmd("sm_orion_visibility_status", Orion_Visibility_CommandStatus, ADMFLAG_GENERIC, "Show Project Orion visibility guard transmit counters.");
     HookEvent("player_spawn", Orion_Visibility_OnPlayerSpawn, EventHookMode_Post);
+    HookEvent("weapon_fire", Orion_Visibility_OnWeaponFire, EventHookMode_Post);
+    HookEvent("player_hurt", Orion_Visibility_OnPlayerHurt, EventHookMode_Post);
     Orion_Visibility_ResetMapCounters();
 
     for (int client = 1; client <= MaxClients; client++)
@@ -78,6 +87,11 @@ void Orion_Visibility_ResetClient(int client)
 
     g_OrionVisibilityBlocked[client] = 0;
     g_OrionVisibilityLastSpawnReportTick[client] = 0;
+    g_OrionVisibilitySuppressedSinceTelemetry[client] = 0;
+    g_OrionVisibilityLastTelemetryAt[client] = 0.0;
+    g_OrionVisibilityPrefireCount[client] = 0;
+    g_OrionVisibilityPrefireWindowStartedAt[client] = 0.0;
+    g_OrionVisibilityLastPrefireEvidenceAt[client] = 0.0;
     Orion_Visibility_ResetPairCache(client);
 }
 
@@ -215,7 +229,9 @@ bool Orion_ShouldEvaluatePvsTransmit(int entity, int observer)
 
     int entityTeam = GetClientTeam(entity);
     int observerTeam = GetClientTeam(observer);
-    if (!Orion_IsCompetitiveTeam(entityTeam) || !Orion_IsCompetitiveTeam(observerTeam) || entityTeam == observerTeam)
+    // Default: survivor-facing infected minimization only. The visual-cheat risk is hidden
+    // infected data drawn for survivors; keeping the scope narrow avoids breaking infected play.
+    if (entityTeam != ORION_TEAM_INFECTED || observerTeam != ORION_TEAM_SURVIVOR)
     {
         return false;
     }
@@ -231,6 +247,216 @@ bool Orion_ShouldEvaluatePvsTransmit(int entity, int observer)
     }
 
     return true;
+}
+
+public void Orion_Visibility_OnWeaponFire(Event event, const char[] name, bool dontBroadcast)
+{
+    // Default: observe only. A real weapon_fire gives the prefire signal an attack
+    // anchor without trusting client-side renderer state Orion cannot inspect.
+    if (!Orion_Visibility_ShouldEvaluatePrefire())
+    {
+        return;
+    }
+
+    int survivor = GetClientOfUserId(event.GetInt("userid"));
+    int infected = 0;
+    if (Orion_Visibility_FindPrefireTarget(survivor, infected))
+    {
+        Orion_Visibility_RecordPrefireEvidence(survivor, infected, "weapon_fire");
+    }
+}
+
+public void Orion_Visibility_OnPlayerHurt(Event event, const char[] name, bool dontBroadcast)
+{
+    // Default: observe only. Hurt correlation is stronger than crosshair-only awareness,
+    // but it still stays rolling evidence because wallbangs and sound reads can be legal.
+    if (!Orion_Visibility_ShouldEvaluatePrefire())
+    {
+        return;
+    }
+
+    int infected = GetClientOfUserId(event.GetInt("userid"));
+    int survivor = GetClientOfUserId(event.GetInt("attacker"));
+    if (!Orion_Visibility_ShouldEvaluatePrefirePair(survivor, infected))
+    {
+        return;
+    }
+
+    if (!Orion_Visibility_IsAimPreciselyOnTarget(survivor, infected))
+    {
+        return;
+    }
+
+    if (!Orion_Visibility_IsPvsHiddenAndStale(survivor, infected))
+    {
+        return;
+    }
+
+    Orion_Visibility_RecordPrefireEvidence(survivor, infected, "player_hurt");
+}
+
+bool Orion_Visibility_ShouldEvaluatePrefire()
+{
+    return Orion_Config_IsEnabled()
+        && Orion_Config_VisibilityGuardEnabled()
+        && Orion_Config_VisibilityPvsEnabled()
+        && Orion_Config_VisibilityPrefireEnabled();
+}
+
+bool Orion_Visibility_ShouldEvaluatePrefirePair(int survivor, int infected)
+{
+    if (!Orion_IsAliveHumanPlayer(survivor) || !Orion_IsAliveHumanPlayer(infected))
+    {
+        return false;
+    }
+
+    if (GetClientTeam(survivor) != ORION_TEAM_SURVIVOR || GetClientTeam(infected) != ORION_TEAM_INFECTED)
+    {
+        return false;
+    }
+
+    if (GetEntProp(infected, Prop_Send, "m_isGhost") == 1)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool Orion_Visibility_FindPrefireTarget(int survivor, int& infected)
+{
+    infected = 0;
+    if (!Orion_IsAliveHumanPlayer(survivor) || GetClientTeam(survivor) != ORION_TEAM_SURVIVOR)
+    {
+        return false;
+    }
+
+    float bestAimDot = Orion_Config_VisibilityPrefireAimDotMin();
+    for (int candidate = 1; candidate <= MaxClients; candidate++)
+    {
+        if (!Orion_Visibility_ShouldEvaluatePrefirePair(survivor, candidate))
+        {
+            continue;
+        }
+
+        float aimDot = Orion_Visibility_GetAimDotToTarget(survivor, candidate);
+        if (aimDot < bestAimDot)
+        {
+            continue;
+        }
+
+        if (!Orion_Visibility_IsPvsHiddenAndStale(survivor, candidate))
+        {
+            continue;
+        }
+
+        bestAimDot = aimDot;
+        infected = candidate;
+    }
+
+    return infected != 0;
+}
+
+bool Orion_Visibility_IsPvsHiddenAndStale(int survivor, int infected)
+{
+    if (!Orion_ShouldEvaluatePvsTransmit(infected, survivor))
+    {
+        return false;
+    }
+
+    if (!Orion_ShouldBlockPvsTransmit(infected, survivor))
+    {
+        return false;
+    }
+
+    float lastVisibleAt = g_OrionVisibilityLastVisibleAt[infected][survivor];
+    if (lastVisibleAt <= 0.0)
+    {
+        return false;
+    }
+
+    return (GetGameTime() - lastVisibleAt) > Orion_Config_VisibilityPvsGraceSeconds();
+}
+
+bool Orion_Visibility_IsAimPreciselyOnTarget(int survivor, int infected)
+{
+    return Orion_Visibility_GetAimDotToTarget(survivor, infected) >= Orion_Config_VisibilityPrefireAimDotMin();
+}
+
+float Orion_Visibility_GetAimDotToTarget(int survivor, int infected)
+{
+    float survivorEyePosition[3];
+    float survivorEyeAngles[3];
+    float survivorForward[3];
+    float targetCenter[3];
+    float directionToTarget[3];
+
+    GetClientEyePosition(survivor, survivorEyePosition);
+    GetClientEyeAngles(survivor, survivorEyeAngles);
+    GetAngleVectors(survivorEyeAngles, survivorForward, NULL_VECTOR, NULL_VECTOR);
+    NormalizeVector(survivorForward, survivorForward);
+
+    Orion_Visibility_GetClientCenter(infected, targetCenter);
+    SubtractVectors(targetCenter, survivorEyePosition, directionToTarget);
+    if (NormalizeVector(directionToTarget, directionToTarget) == 0.0)
+    {
+        return -1.0;
+    }
+
+    return GetVectorDotProduct(survivorForward, directionToTarget);
+}
+
+void Orion_Visibility_RecordPrefireEvidence(int survivor, int infected, const char[] triggerName)
+{
+    float now = GetGameTime();
+    float windowSeconds = Orion_Config_VisibilityPrefireWindowSeconds();
+
+    if (g_OrionVisibilityPrefireWindowStartedAt[survivor] <= 0.0
+        || (now - g_OrionVisibilityPrefireWindowStartedAt[survivor]) > windowSeconds)
+    {
+        g_OrionVisibilityPrefireWindowStartedAt[survivor] = now;
+        g_OrionVisibilityPrefireCount[survivor] = 0;
+    }
+
+    g_OrionVisibilityPrefireCount[survivor]++;
+    int minimumEvents = Orion_Config_VisibilityPrefireMinEvents();
+    // Default: require a sustained count. One hidden prefire is common in real play;
+    // repeated precise attacks after the PVS grace window are the behavioral signal.
+    if (g_OrionVisibilityPrefireCount[survivor] < minimumEvents)
+    {
+        return;
+    }
+
+    if (g_OrionVisibilityLastPrefireEvidenceAt[survivor] > 0.0
+        && (now - g_OrionVisibilityLastPrefireEvidenceAt[survivor]) < Orion_Config_VisibilityPrefireEvidenceCooldownSeconds())
+    {
+        return;
+    }
+
+    g_OrionVisibilityLastPrefireEvidenceAt[survivor] = now;
+
+    float score = 45.0 + (float(g_OrionVisibilityPrefireCount[survivor] - minimumEvents + 1) * 10.0);
+    if (score > 85.0)
+    {
+        score = 85.0;
+    }
+
+    char details[320];
+    Format(
+        details,
+        sizeof(details),
+        "reason=prefire_through_wall trigger=%s target=%d hidden_ticks=%d last_visible_age=%.2f count=%d threshold=%d window_seconds=%.1f aim_dot=%.4f trace_count=%d trace_budget=%d",
+        triggerName,
+        infected,
+        g_OrionVisibilityPvsHiddenTicks[infected][survivor],
+        now - g_OrionVisibilityLastVisibleAt[infected][survivor],
+        g_OrionVisibilityPrefireCount[survivor],
+        minimumEvents,
+        windowSeconds,
+        Orion_Visibility_GetAimDotToTarget(survivor, infected),
+        g_OrionVisibilityTraceCount,
+        Orion_Config_VisibilityTraceBudgetPerTick());
+    Orion_Evidence_Submit(survivor, "visibility_guard", score, "observe", details);
 }
 
 public void Orion_Visibility_OnPlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -572,11 +798,6 @@ int Orion_Visibility_CurrentTick()
     return RoundToFloor(GetGameTime() / GetTickInterval());
 }
 
-bool Orion_IsCompetitiveTeam(int team)
-{
-    return team == ORION_TEAM_SURVIVOR || team == ORION_TEAM_INFECTED;
-}
-
 void Orion_Visibility_RecordAllowed(int reason)
 {
     if (reason >= 0 && reason < view_as<int>(OrionVisibilityReason_Count))
@@ -595,13 +816,19 @@ void Orion_Visibility_RecordSuppressed(int reason)
 
 void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int reason, float score, bool blocked)
 {
+    score = 0.0;
     g_OrionVisibilityBlocked[observer]++;
+    g_OrionVisibilitySuppressedSinceTelemetry[observer]++;
     Orion_Visibility_RecordSuppressed(reason);
 
-    if (g_OrionVisibilityBlocked[observer] != 1 && (g_OrionVisibilityBlocked[observer] % 250) != 0)
+    float now = GetGameTime();
+    if (g_OrionVisibilityLastTelemetryAt[observer] > 0.0
+        && (now - g_OrionVisibilityLastTelemetryAt[observer]) < ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS)
     {
         return;
     }
+
+    g_OrionVisibilityLastTelemetryAt[observer] = now;
 
     char reasonName[32];
     char spawnState[32];
@@ -611,7 +838,7 @@ void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int rea
     Format(
         details,
         sizeof(details),
-        "reason=%s entity=%d team=%d spawn_state=%s blocked=%d suppressed=%d observer_blocks=%d hidden_ticks=%d",
+        "classification=mitigation_telemetry reason=%s entity=%d team=%d spawn_state=%s blocked=%d suppressed_total=%d observer_blocks_total=%d observer_blocks_window=%d hidden_ticks=%d throttle_seconds=%.1f",
         reasonName,
         entity,
         GetClientTeam(entity),
@@ -619,8 +846,11 @@ void Orion_Visibility_RecordSuppressedEvidence(int entity, int observer, int rea
         blocked,
         g_OrionVisibilitySuppressedByReason[reason],
         g_OrionVisibilityBlocked[observer],
-        g_OrionVisibilityPvsHiddenTicks[entity][observer]);
-    Orion_Evidence_Submit(observer, "visibility_guard", score, "observe", details);
+        g_OrionVisibilitySuppressedSinceTelemetry[observer],
+        g_OrionVisibilityPvsHiddenTicks[entity][observer],
+        ORION_VISIBILITY_TELEMETRY_THROTTLE_SECONDS);
+    g_OrionVisibilitySuppressedSinceTelemetry[observer] = 0;
+    Orion_Evidence_Submit(observer, "visibility_guard", score, "telemetry", details);
 }
 
 void Orion_Visibility_RecordSpawnEvidence(int infected, int survivor, float distance, bool hasLineOfSight, bool isNearSpawn, bool isVisibleSpawn)

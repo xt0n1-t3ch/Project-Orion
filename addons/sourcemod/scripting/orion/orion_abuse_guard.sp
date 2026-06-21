@@ -19,6 +19,9 @@ float g_OrionAbuseNameWindowStartedAt[MAXPLAYERS + 1];
 int g_OrionAbuseNameChangesInWindow[MAXPLAYERS + 1];
 bool g_OrionAbuseHasLastKnownName[MAXPLAYERS + 1];
 char g_OrionAbuseLastKnownName[MAXPLAYERS + 1][MAX_NAME_LENGTH];
+int g_OrionVocalizeBurstCount[MAXPLAYERS + 1];
+float g_OrionVocalizeLastTime[MAXPLAYERS + 1];
+int g_OrionVocalizeSpamAlerts[MAXPLAYERS + 1];
 
 void Orion_AbuseGuard_Init()
 {
@@ -44,6 +47,9 @@ void Orion_AbuseGuard_ResetClient(int client)
     g_OrionAbuseNameChangesInWindow[client] = 0;
     g_OrionAbuseHasLastKnownName[client] = false;
     g_OrionAbuseLastKnownName[client][0] = '\0';
+    g_OrionVocalizeBurstCount[client] = 0;
+    g_OrionVocalizeLastTime[client] = 0.0;
+    g_OrionVocalizeSpamAlerts[client] = 0;
 
     if (client <= MaxClients && IsClientInGame(client))
     {
@@ -57,6 +63,13 @@ public Action Orion_AbuseGuard_OnCommand(int client, const char[] command, int a
     if (!Orion_Config_IsEnabled() || !Orion_IsHumanPlayer(client))
     {
         return Plugin_Continue;
+    }
+
+    // Vocalize (radial/voice menu) has its own budget + cooldown + kick ladder,
+    // so it never touches the generic command-rate path below.
+    if (StrEqual(command, "vocalize", false))
+    {
+        return Orion_AbuseGuard_HandleVocalize(client);
     }
 
     int commandsInWindow = 0;
@@ -110,6 +123,66 @@ public Action Orion_AbuseGuard_OnCommand(int client, const char[] command, int a
     }
 
     return Plugin_Continue;
+}
+
+Action Orion_AbuseGuard_HandleVocalize(int client)
+{
+    if (!Orion_Config_VocalizeGuardEnabled())
+    {
+        return Plugin_Continue;
+    }
+
+    float now = GetGameTime();
+    float cooldownSeconds = Orion_Config_VocalizeCooldownSeconds();
+    int budget = Orion_Config_VocalizeBudget();
+
+    // A full quiet cooldown forgives the burst: fresh budget and the spam tally
+    // clears once the player behaves. `now < last` catches the map-change clock
+    // reset (GetGameTime restarts at 0) so a stale timestamp never lingers.
+    float elapsedSeconds = now - g_OrionVocalizeLastTime[client];
+    if (g_OrionVocalizeLastTime[client] > 0.0 && (elapsedSeconds >= cooldownSeconds || now < g_OrionVocalizeLastTime[client]))
+    {
+        g_OrionVocalizeBurstCount[client] = 0;
+        g_OrionVocalizeSpamAlerts[client] = 0;
+    }
+
+    g_OrionVocalizeBurstCount[client]++;
+    g_OrionVocalizeLastTime[client] = now;
+
+    // Within budget: normal vocalizing, let it through.
+    if (g_OrionVocalizeBurstCount[client] <= budget)
+    {
+        return Plugin_Continue;
+    }
+
+    // Over budget without waiting the cooldown: spam. Record an alert, block the
+    // vocalize, and kick once the configured alert count is reached.
+    g_OrionVocalizeSpamAlerts[client]++;
+
+    char details[192];
+    Format(
+        details,
+        sizeof(details),
+        "reason=vocalize_spam count=%d budget=%d alerts=%d cooldown=%.1f",
+        g_OrionVocalizeBurstCount[client],
+        budget,
+        g_OrionVocalizeSpamAlerts[client],
+        cooldownSeconds);
+    Orion_Evidence_Submit(client, "vocalize_spam", float(g_OrionVocalizeSpamAlerts[client]) * 10.0, "block", details);
+
+    int alertsBeforeKick = Orion_Config_VocalizeAlertsBeforeKick();
+    if (alertsBeforeKick > 0 && g_OrionVocalizeSpamAlerts[client] >= alertsBeforeKick)
+    {
+        // Localized kick reason in the player's own game language.
+        char kickReason[128];
+        Orion_Messages_FormatKickReason(client, "vocalize_spam", kickReason, sizeof(kickReason));
+        KickClient(client, "%s", kickReason);
+        g_OrionVocalizeBurstCount[client] = 0;
+        g_OrionVocalizeSpamAlerts[client] = 0;
+        g_OrionVocalizeLastTime[client] = 0.0;
+    }
+
+    return Plugin_Handled;
 }
 
 void Orion_AbuseGuard_OnClientSettingsChanged(int client)
@@ -396,8 +469,7 @@ bool Orion_AbuseGuard_IsObservedClientCommand(const char[] command)
         || StrEqual(command, "spectate", false)
         || StrEqual(command, "callvote", false)
         || StrEqual(command, "vote", false)
-        || StrEqual(command, "menuselect", false)
-        || StrEqual(command, "vocalize", false);
+        || StrEqual(command, "menuselect", false);
 }
 
 int Orion_AbuseGuard_CountControlCharacters(const char[] text)
