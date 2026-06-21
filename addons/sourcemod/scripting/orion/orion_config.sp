@@ -37,6 +37,33 @@ ConVar g_OrionAbilityGuardChargerSteerCapDegrees = null;
 ConVar g_OrionAbilityGuardAirStuckWindowTicks = null;
 ConVar g_OrionAlertAudienceDefault = null;
 StringMap g_OrionAlertAudienceCvars = null;
+ConVar g_OrionAimIntegrityEnable = null;
+ConVar g_OrionAimSilentMismatchDegrees = null;
+ConVar g_OrionAimSilentMismatchMinHits = null;
+ConVar g_OrionAimLaserTightDegrees = null;
+ConVar g_OrionAimLaserTightMinHits = null;
+ConVar g_OrionAimNorecoilFlatPitchDegrees = null;
+ConVar g_OrionAimNorecoilMinBurstShots = null;
+ConVar g_OrionAimNorecoilMinHits = null;
+ConVar g_OrionAimRapidfireMinCycleTicks = null;
+ConVar g_OrionAimRapidfireMinSignals = null;
+ConVar g_OrionForwardtrackToleranceTicks = null;
+ConVar g_OrionBacktrackHitWindowTicks = null;
+ConVar g_OrionMovementCommandRateWindowSeconds = null;
+ConVar g_OrionMovementCommandRateAllowanceTicks = null;
+ConVar g_OrionMovementTickbaseDeviationToleranceTicks = null;
+ConVar g_OrionMovementTickbaseRateAllowanceTicks = null;
+ConVar g_OrionMovementFakeAngleToleranceDegrees = null;
+ConVar g_OrionMovementFakeAngleStreakTicks = null;
+ConVar g_OrionMovementFakeAngleMinSpeedUps = null;
+ConVar g_OrionMovementTeleportMinHorizontalUnits = null;
+ConVar g_OrionMovementTeleportAllowanceMultiplier = null;
+ConVar g_OrionMovementTeleportMaxSpeedUps = null;
+ConVar g_OrionVisibilityPrefireEnable = null;
+ConVar g_OrionVisibilityPrefireAimDotMin = null;
+ConVar g_OrionVisibilityPrefireWindowSeconds = null;
+ConVar g_OrionVisibilityPrefireMinEvents = null;
+ConVar g_OrionVisibilityPrefireEvidenceCooldownSeconds = null;
 
 // Detection types that get an individually-configurable alert audience cvar.
 static const char ORION_ALERT_AUDIENCE_TYPES[][] =
@@ -107,6 +134,39 @@ void Orion_Config_Init()
         ConVar audienceCvar = CreateConVar(audienceCvarName, "admins", audienceCvarDesc);
         g_OrionAlertAudienceCvars.SetValue(ORION_ALERT_AUDIENCE_TYPES[audienceIndex], audienceCvar);
     }
+
+    // Aim integrity (silent / nospread / norecoil / rapidfire). CONFIRM ON LIVE.
+    g_OrionAimIntegrityEnable = CreateConVar("orion_aim_integrity_enable", "1", "Enable silent-aim, nospread, norecoil, and rapidfire aim-integrity detections.", _, true, 0.0, true, 1.0);
+    g_OrionAimSilentMismatchDegrees = CreateConVar("orion_aim_silent_mismatch_degrees", "35.0", "Degrees the served crosshair may sit off a victim at the hit tick before it is silent-aim evidence.", _, true, 0.0, true, 180.0);
+    g_OrionAimSilentMismatchMinHits = CreateConVar("orion_aim_silent_mismatch_min_hits", "3", "Off-crosshair hits required before silent-aim is reported.", _, true, 1.0, true, 50.0);
+    g_OrionAimLaserTightDegrees = CreateConVar("orion_aim_laser_tight_degrees", "1.5", "Spread cone (degrees) below which hits look laser-tight (fake-upgrade nospread).", _, true, 0.0, true, 45.0);
+    g_OrionAimLaserTightMinHits = CreateConVar("orion_aim_laser_tight_min_hits", "4", "Laser-tight hits without the laser upgrade bit before nospread is reported.", _, true, 1.0, true, 50.0);
+    g_OrionAimNorecoilFlatPitchDegrees = CreateConVar("orion_aim_norecoil_flat_pitch_degrees", "2.0", "Max cumulative pitch climb (degrees) across a burst before recoil looks compensated.", _, true, 0.0, true, 45.0);
+    g_OrionAimNorecoilMinBurstShots = CreateConVar("orion_aim_norecoil_min_burst_shots", "6", "Shots in a sustained burst required before norecoil is evaluated.", _, true, 2.0, true, 100.0);
+    g_OrionAimNorecoilMinHits = CreateConVar("orion_aim_norecoil_min_hits", "3", "Flat-recoil bursts required before norecoil is reported.", _, true, 1.0, true, 50.0);
+    g_OrionAimRapidfireMinCycleTicks = CreateConVar("orion_aim_rapidfire_min_cycle_ticks", "3", "Minimum legal ticks between shots; faster fire is rapidfire evidence.", _, true, 1.0, true, 66.0);
+    g_OrionAimRapidfireMinSignals = CreateConVar("orion_aim_rapidfire_min_signals", "3", "Rapidfire signals required before it is reported.", _, true, 1.0, true, 50.0);
+
+    // Lagexploit / backtrack / speed / teleport / fake-angle. CONFIRM ON LIVE.
+    g_OrionForwardtrackToleranceTicks = CreateConVar("orion_forwardtrack_tolerance_ticks", "11", "Allowed forward usercmd tick jump before forwardtrack evidence is scored.", _, true, 0.0, true, 64.0);
+    g_OrionBacktrackHitWindowTicks = CreateConVar("orion_backtrack_hit_window_ticks", "8", "Ticks within which a tick regression/advance correlated with a hit counts as backtrack.", _, true, 1.0, true, 64.0);
+    g_OrionMovementCommandRateWindowSeconds = CreateConVar("orion_movement_command_rate_window_seconds", "1.0", "Window over which usercmd-per-second is measured for speedhack.", _, true, 0.25, true, 10.0);
+    g_OrionMovementCommandRateAllowanceTicks = CreateConVar("orion_movement_command_rate_allowance_ticks", "8", "Extra commands above the tickrate allowed in the window before speedhack is scored.", _, true, 0.0, true, 64.0);
+    g_OrionMovementTickbaseDeviationToleranceTicks = CreateConVar("orion_movement_tickbase_deviation_tolerance_ticks", "12", "Allowed m_nTickBase deviation from expected before lagexploit/fakeping is scored.", _, true, 0.0, true, 128.0);
+    g_OrionMovementTickbaseRateAllowanceTicks = CreateConVar("orion_movement_tickbase_rate_allowance_ticks", "8", "Allowed extra tickbase advance over elapsed server ticks before speed is scored.", _, true, 0.0, true, 64.0);
+    g_OrionMovementFakeAngleToleranceDegrees = CreateConVar("orion_movement_fake_angle_tolerance_degrees", "45.0", "Degrees the velocity direction may differ from the served move-through-yaw before fake-angle is scored.", _, true, 0.0, true, 180.0);
+    g_OrionMovementFakeAngleStreakTicks = CreateConVar("orion_movement_fake_angle_streak_ticks", "16", "Consecutive inconsistent ticks before fake-angle is reported.", _, true, 1.0, true, 200.0);
+    g_OrionMovementFakeAngleMinSpeedUps = CreateConVar("orion_movement_fake_angle_min_speed_ups", "120.0", "Minimum horizontal speed (units/s) before fake-angle consistency is evaluated.", _, true, 0.0, true, 1000.0);
+    g_OrionMovementTeleportMinHorizontalUnits = CreateConVar("orion_movement_teleport_min_horizontal_units", "250.0", "Minimum per-tick horizontal jump (units) considered for a teleport.", _, true, 0.0, true, 5000.0);
+    g_OrionMovementTeleportAllowanceMultiplier = CreateConVar("orion_movement_teleport_allowance_multiplier", "1.5", "Multiple of max-speed*tickinterval a jump may reach before teleport is scored.", _, true, 1.0, true, 10.0);
+    g_OrionMovementTeleportMaxSpeedUps = CreateConVar("orion_movement_teleport_max_speed_ups", "400.0", "Reference max legal horizontal speed (units/s) for the teleport bound.", _, true, 1.0, true, 5000.0);
+
+    // Visual-cheat prefire-through-wall (behavioral). Data-minimization is honest mitigation. CONFIRM ON LIVE.
+    g_OrionVisibilityPrefireEnable = CreateConVar("orion_visibility_prefire_enable", "1", "Score precise aim/fire at a PVS-hidden, not-recently-visible enemy (wall awareness).", _, true, 0.0, true, 1.0);
+    g_OrionVisibilityPrefireAimDotMin = CreateConVar("orion_visibility_prefire_aim_dot_min", "0.985", "Minimum aim-to-enemy dot (precision) before prefire-through-wall is considered.", _, true, 0.0, true, 1.0);
+    g_OrionVisibilityPrefireWindowSeconds = CreateConVar("orion_visibility_prefire_window_seconds", "3.0", "Seconds an enemy must have been continuously non-visible for prefire to count.", _, true, 0.0, true, 30.0);
+    g_OrionVisibilityPrefireMinEvents = CreateConVar("orion_visibility_prefire_min_events", "3", "Prefire-through-wall events required before it is reported.", _, true, 1.0, true, 50.0);
+    g_OrionVisibilityPrefireEvidenceCooldownSeconds = CreateConVar("orion_visibility_prefire_evidence_cooldown_seconds", "5.0", "Seconds between prefire-through-wall reports for one client.", _, true, 0.0, true, 60.0);
     g_OrionBacktrackPatchEnable = CreateConVar("orion_backtrack_patch_enable", "1", "Score suspicious command tick drift/backtrack windows.", _, true, 0.0, true, 1.0);
     g_OrionBacktrackToleranceTicks = CreateConVar("orion_backtrack_tolerance_ticks", "2", "Allowed command tick drift before backtrack evidence is scored.", _, true, 0.0, true, 16.0);
     g_OrionHardMitigationEnable = CreateConVar("orion_hard_mitigation_enable", "1", "Allow Orion to patch unsafe usercmd values outside shadow mode.", _, true, 0.0, true, 1.0);
@@ -350,6 +410,141 @@ void Orion_Config_GetAlertAudience(const char[] evidenceType, char[] buffer, int
     }
 
     strcopy(buffer, bufferLength, "admins");
+}
+
+bool Orion_Config_AimIntegrityEnabled()
+{
+    return g_OrionAimIntegrityEnable != null && g_OrionAimIntegrityEnable.BoolValue;
+}
+
+float Orion_Config_AimSilentMismatchDegrees()
+{
+    return g_OrionAimSilentMismatchDegrees.FloatValue;
+}
+
+int Orion_Config_AimSilentMismatchMinHits()
+{
+    return g_OrionAimSilentMismatchMinHits.IntValue;
+}
+
+float Orion_Config_AimLaserTightDegrees()
+{
+    return g_OrionAimLaserTightDegrees.FloatValue;
+}
+
+int Orion_Config_AimLaserTightMinHits()
+{
+    return g_OrionAimLaserTightMinHits.IntValue;
+}
+
+float Orion_Config_AimNorecoilFlatPitchDegrees()
+{
+    return g_OrionAimNorecoilFlatPitchDegrees.FloatValue;
+}
+
+int Orion_Config_AimNorecoilMinBurstShots()
+{
+    return g_OrionAimNorecoilMinBurstShots.IntValue;
+}
+
+int Orion_Config_AimNorecoilMinHits()
+{
+    return g_OrionAimNorecoilMinHits.IntValue;
+}
+
+int Orion_Config_AimRapidfireMinCycleTicks()
+{
+    return g_OrionAimRapidfireMinCycleTicks.IntValue;
+}
+
+int Orion_Config_AimRapidfireMinSignals()
+{
+    return g_OrionAimRapidfireMinSignals.IntValue;
+}
+
+int Orion_Config_ForwardtrackToleranceTicks()
+{
+    return g_OrionForwardtrackToleranceTicks.IntValue;
+}
+
+int Orion_Config_BacktrackHitWindowTicks()
+{
+    return g_OrionBacktrackHitWindowTicks.IntValue;
+}
+
+float Orion_Config_MovementCommandRateWindowSeconds()
+{
+    return g_OrionMovementCommandRateWindowSeconds.FloatValue;
+}
+
+int Orion_Config_MovementCommandRateAllowanceTicks()
+{
+    return g_OrionMovementCommandRateAllowanceTicks.IntValue;
+}
+
+int Orion_Config_MovementTickbaseDeviationToleranceTicks()
+{
+    return g_OrionMovementTickbaseDeviationToleranceTicks.IntValue;
+}
+
+int Orion_Config_MovementTickbaseRateAllowanceTicks()
+{
+    return g_OrionMovementTickbaseRateAllowanceTicks.IntValue;
+}
+
+float Orion_Config_MovementFakeAngleToleranceDegrees()
+{
+    return g_OrionMovementFakeAngleToleranceDegrees.FloatValue;
+}
+
+int Orion_Config_MovementFakeAngleStreakTicks()
+{
+    return g_OrionMovementFakeAngleStreakTicks.IntValue;
+}
+
+float Orion_Config_MovementFakeAngleMinSpeedUps()
+{
+    return g_OrionMovementFakeAngleMinSpeedUps.FloatValue;
+}
+
+float Orion_Config_MovementTeleportMinHorizontalUnits()
+{
+    return g_OrionMovementTeleportMinHorizontalUnits.FloatValue;
+}
+
+float Orion_Config_MovementTeleportAllowanceMultiplier()
+{
+    return g_OrionMovementTeleportAllowanceMultiplier.FloatValue;
+}
+
+float Orion_Config_MovementTeleportMaxSpeedUps()
+{
+    return g_OrionMovementTeleportMaxSpeedUps.FloatValue;
+}
+
+bool Orion_Config_VisibilityPrefireEnabled()
+{
+    return g_OrionVisibilityPrefireEnable != null && g_OrionVisibilityPrefireEnable.BoolValue;
+}
+
+float Orion_Config_VisibilityPrefireAimDotMin()
+{
+    return g_OrionVisibilityPrefireAimDotMin.FloatValue;
+}
+
+float Orion_Config_VisibilityPrefireWindowSeconds()
+{
+    return g_OrionVisibilityPrefireWindowSeconds.FloatValue;
+}
+
+int Orion_Config_VisibilityPrefireMinEvents()
+{
+    return g_OrionVisibilityPrefireMinEvents.IntValue;
+}
+
+float Orion_Config_VisibilityPrefireEvidenceCooldownSeconds()
+{
+    return g_OrionVisibilityPrefireEvidenceCooldownSeconds.FloatValue;
 }
 
 bool Orion_Config_BacktrackPatchEnabled()

@@ -61,6 +61,17 @@ The remaining full PVS parity work needs these SourceMod/L4D2 pieces validated b
 | Per-target PVS cache | short timer or tick-window cache keyed by observer/entity | needs CPU budget proof under full 8v8/spectator load |
 | Evidence export | `Orion_Evidence_Submit` with `visibility_guard` details | reason-coded suppression is wired; allowed counters stay status-only to avoid log spam |
 
+## Phase 6 visual-cheat visibility limits
+
+Reborn-style chams, ESP, wallhack, radar, glow, boxes, and tracers are render cheats. A SourceMod server cannot see the injected renderer, overlay draw calls, or client memory that makes those visuals. Orion must not claim direct detection for a pure visual hack.
+
+The server-side answer is mitigation plus behavioral evidence:
+
+- **Data minimization:** keep suppressing ghost/dead/inactive infected and, when `orion_visibility_pvs_block_enable` is explicitly enabled, fail-open PVS-hidden infected transmission to survivors after the grace window. This can starve a wallhack of entity state the player should not legitimately receive. It stays conservative because a bad LOS/PVS decision can break real gameplay.
+- **Impossible awareness evidence:** score `reason=prefire_through_wall` only when a survivor repeatedly aims at, fires at, or hurts a spawned infected that Orion's PVS has proven hidden, outside the recent-visibility grace window, and precise enough to point at the target through geometry. Single events are not enough; sound cues, corner timing, and common prefires are legitimate.
+
+This is not proof that the client rendered ESP. It is evidence that the player acted on hidden information the server did not consider visible, combined with a mitigation path that reduces how much hidden information the client receives.
+
 ## Lilac/SMAC replacement bar
 
 Phase 1 covers Lilac's public feature classes: angle-cheat evidence, chat-clear patching, invalid cvar detection, bhop/macro evidence, aimbot/autoshoot/aimlock evidence, max interp evidence, max ping/loss evidence, backtrack/tick drift scoring, and invalid name detection. It also covers the SMAC classes relevant to L4D2 competitive servers: aimbot, wallhack/data minimization, cvars, speed/tick anomalies, spinhack-like invalid angles, and L4D2 ghost-state protection.
