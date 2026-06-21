@@ -112,3 +112,31 @@ The tool name and included instructions say to run the MD5 changer against the i
 - Visibility suppression must be safe and narrow. Blocking ghost infected from survivors is high-value and low-risk; blocking all infected data would break gameplay.
 - Nospread and humanized aim need statistical treatment; a single unlikely shot is not enough.
 - Default mode must remain `shadow` until BLACKWATCH has a clean validation corpus.
+
+## Mechanisms (verified)
+
+- `VR.dll` is packed. The `.data` section has an approximately 558 MB virtual size, so static control-flow recovery is not reliable enough for signatures. Orion should treat the trainer as behavior-only from the server side.
+- The trainer hooks `CreateMove` and mutates `user_cmd_t`, which explains why server-visible checks should focus on usercmd angles, buttons, command tickcount, and shot timing.
+- Nospread is implemented by recomputing `random_seed` through `MD5_PseudoRandom` or by faking the laser-sight upgrade bit through `m_upgradeBitVec`.
+- Silent aim serves a fake view angle while firing on the real angle, then runs movement correction so the client keeps moving in the intended direction.
+- Lagexploit and speed features manipulate `m_nTickBase`; Orion should treat sudden or sustained tickbase deviation as an exploit signal only after per-client baseline correction.
+- Rapidfire toggles `IN_ATTACK` and manipulates weapon readiness through `m_flNextPrimaryAttack`.
+- Bunnyhop drops `IN_JUMP` while airborne, turning a held jump key into timed legal-looking jump commands.
+- Imports support this behavior map: `KERNEL32`, `USER32` with `GetAsyncKeyState`, `libcef` plus `SDL2` plus `OPENGL32` for the menu, `XINPUT1_3`, and `WS2_32` plus `WLDAP32` plus `bcrypt` for curl-backed license authentication.
+
+## Detection matrix
+
+| Feature | Server signature | Orion module | FP risk |
+|---|---|---|---|
+| DLL injection | No reliable server-side signal | None; detect outcomes only | File/hash signatures are high-risk and out of scope for SourceMod |
+| ESP / glow / chams | Suspicious pre-aim, tracking, and reactions to entities the player should not know about | `orion_visibility_guard`, `orion_aim_analyzer` | Medium; map knowledge and team comms can mimic awareness |
+| Silent / perfect silent aim | Fire events align to a valid target without a human-visible aim transition | `orion_aim_analyzer` | Low when gated on fresh valid target and hit/death correlation |
+| Humanized aim | Long-window acquisition and tracking rates exceed clean-player baselines | `orion_aim_analyzer` | Medium; requires rolling evidence, not a single turn |
+| Nospread | Improbable weapon hit clusters by range, movement state, and weapon class | Future weapon-probability scoring in `orion_aim_analyzer` | Medium-high until calibrated against real clean weapon corpus |
+| No recoil | Repeated shot outcomes without expected recovery pattern | Future weapon-outcome scoring | Medium-high; weapon and skill variance matter |
+| Lagexploit / speedhack | Sustained command tick drift away from a per-client baseline | `orion_movement_analyzer` | Low after active-sample gate, sanity clamp, and baseline model |
+| Rapidfire | Attack cadence conflicts with weapon readiness windows | Future weapon timing guard | Low if checked against weapon-specific `m_flNextPrimaryAttack` windows |
+| Bhop / jump macro | Airborne jump commands are suppressed or timed too consistently over a rolling window | `orion_movement_analyzer` | Medium; scroll-wheel jumping and high-skill movement require observe-first tuning |
+| Fake angles / spin | Invalid pitch/roll, extreme yaw deltas, or angle/mouse mismatch | `orion_aim_analyzer` | Low for invalid angles; medium for raw turn magnitude |
+| Backtrack | Hit timing conflicts with accepted interpolation and server chronology | Integrity and movement analyzers | Medium until paired with max-interp and hit-window context |
+| Chat/name abuse | Invalid names, chat-clear payloads, or command abuse | Integrity guard | Low with exact payload checks |
